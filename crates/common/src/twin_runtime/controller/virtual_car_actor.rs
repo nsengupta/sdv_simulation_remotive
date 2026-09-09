@@ -44,6 +44,7 @@ use crate::observation_records::transition::sink::{
 };
 use crate::observation_records::transition::{PublishedTransitionRecord, SessionClock};
 use crate::twin_runtime::ZoneReplies;
+use crate::twin_runtime::bcm_actor::{BcmActor, BcmActorMsg, BcmActorState, tell_bcm_zone};
 use crate::twin_runtime::constants::ZONE_TELL_BACK_WAIT;
 use crate::twin_runtime::controller::actuation_manager::{
     ActuationManager, DefaultActuationManager,
@@ -64,7 +65,9 @@ use crate::twin_runtime::zone_tell_back::{
 };
 use crate::twin_runtime::zone_turn::zone_message_for_event;
 use crate::vehicle_state::WiperState;
-use crate::vehicle_state::{HeadlampMessage, VehicleContext, WiperMessage};
+use crate::vehicle_state::{
+    BcmMessage, BcmZoneReply, HeadlampMessage, VehicleContext, WiperMessage,
+};
 
 /// The Digital Twin Actor
 pub struct VirtualCarActor;
@@ -93,6 +96,7 @@ impl From<&str> for VirtualCarActorArgs {
 /// Mutable state of the virtual car actor, held across `handle` calls.
 pub struct VirtualCarRuntimeState {
     twin_car: DigitalTwinCar,
+    bcm_actor: ActorRef<BcmActorMsg>,
     headlamp_actor: ActorRef<HeadlampActorMsg>,
     wiper_actor: ActorRef<WiperActorMsg>,
     /// Stable self-reference used to arm timers and send `ZoneTellBackTimeout` messages.
@@ -178,19 +182,31 @@ impl Actor for VirtualCarActor {
             };
 
         let (headlamp_actor, _) = ractor::spawn::<HeadlampActor>(HeadlampActorState::new(
-            Default::default(),
+            crate::vehicle_state::HeadlampContext {
+                state: crate::vehicle_state::HeadlampState::Ready,
+                ack_pending_since: None,
+            },
             args.runtime_options.test_silent_headlamp,
         ))
         .await?;
 
         let (wiper_actor, _) = ractor::spawn::<WiperActor>(WiperActorState::new(
-            Default::default(),
+            crate::vehicle_state::WiperContext {
+                state: WiperState::Ready,
+            },
             args.runtime_options.test_silent_wiper,
+        ))
+        .await?;
+
+        let (bcm_actor, _) = ractor::spawn::<BcmActor>(BcmActorState::new(
+            Default::default(),
+            args.runtime_options.test_silent_bcm,
         ))
         .await?;
 
         Ok(VirtualCarRuntimeState {
             twin_car: DigitalTwinCar::new(identity, FsmState::Off, VehicleContext::default())?,
+            bcm_actor,
             headlamp_actor,
             wiper_actor,
             self_ref: myself.clone(),
@@ -221,6 +237,14 @@ impl Actor for VirtualCarActor {
             Fsm(evt_arrived) => {
                 if matches!(runtime_state.twin_car.current_state(), FsmState::Off)
                     && !matches!(evt_arrived, FsmEvent::PowerOn)
+                {
+                    return Ok(());
+                }
+                if matches!(evt_arrived, FsmEvent::HazardButtonChanged(_))
+                    && matches!(
+                        runtime_state.twin_car.current_state(),
+                        FsmState::PreparingToStart(_) | FsmState::PreparingToStop(_)
+                    )
                 {
                     return Ok(());
                 }
@@ -275,6 +299,7 @@ impl Actor for VirtualCarActor {
             entry.abort_all_timers();
         }
         runtime_state.barrier_queue.clear();
+        runtime_state.bcm_actor.stop(None);
         runtime_state.headlamp_actor.stop(None);
         runtime_state.wiper_actor.stop(None);
         Ok(())
@@ -286,6 +311,7 @@ impl VirtualCarActor {
 
     fn become_on_message_for(assembly_id: AssemblyId) -> ZoneMessage {
         match assembly_id {
+            AssemblyId::Bcm => ZoneMessage::Bcm(BcmMessage::BecomeOn),
             AssemblyId::Headlamp => ZoneMessage::Headlamp(HeadlampMessage::BecomeOn),
             AssemblyId::Wiper => ZoneMessage::Wiper(WiperMessage::BecomeOn),
         }
@@ -293,6 +319,7 @@ impl VirtualCarActor {
 
     fn become_off_message_for(assembly_id: AssemblyId) -> ZoneMessage {
         match assembly_id {
+            AssemblyId::Bcm => ZoneMessage::Bcm(BcmMessage::BecomeOff),
             AssemblyId::Headlamp => ZoneMessage::Headlamp(HeadlampMessage::BecomeOff),
             AssemblyId::Wiper => ZoneMessage::Wiper(WiperMessage::BecomeOff),
         }
@@ -308,6 +335,14 @@ impl VirtualCarActor {
         now: Instant,
     ) -> Result<(), ActorProcessingErr> {
         match message {
+            ZoneMessage::Bcm(m) => tell_bcm_zone(
+                &runtime_state.bcm_actor,
+                brain,
+                turn_id,
+                tell_attempt,
+                *m,
+                now,
+            ),
             ZoneMessage::Headlamp(m) => tell_headlamp_zone(
                 &runtime_state.headlamp_actor,
                 brain,
@@ -329,6 +364,10 @@ impl VirtualCarActor {
 
     fn synthetic_reply_for(ctx: &VehicleContext, assembly_id: AssemblyId) -> ZoneReply {
         match assembly_id {
+            AssemblyId::Bcm => ZoneReply::Bcm(BcmZoneReply {
+                ctx: ctx.bcm.clone(),
+                outcomes: vec![],
+            }),
             AssemblyId::Headlamp => {
                 ZoneReply::Headlamp(synthetic_unresponsive_headlamp_reply(&ctx.headlamp))
             }
@@ -423,6 +462,9 @@ impl VirtualCarActor {
         };
 
         if !barrier.tell_attempt_matches(zone_id, tell_attempt) {
+            return Ok(());
+        }
+        if !reply.matches_assembly(zone_id) {
             return Ok(());
         }
 

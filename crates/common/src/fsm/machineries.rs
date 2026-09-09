@@ -14,7 +14,7 @@ pub use crate::vehicle_state::{FrontHeadlampIncompleteCause, FrontHeadlampSwitch
 /// Single source of truth for assembly topology. Used to seed the initial
 /// `BTreeSet` inside `PreparingToStart` / `PreparingToStop` on the entry transitions
 /// and to populate `StartAssemblies` / `StopAssemblies` action payloads.
-pub(crate) const ALL_ASSEMBLIES: &[AssemblyId] = &[AssemblyId::Headlamp, AssemblyId::Wiper];
+pub(crate) const ALL_ASSEMBLIES: &[AssemblyId] = &[AssemblyId::Bcm];
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FsmState {
@@ -47,6 +47,7 @@ pub enum FsmState {
 /// without coupling the brain to zone-specific types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum AssemblyId {
+    Bcm,
     Headlamp,
     /// assembly: windshield wiper.
     Wiper,
@@ -113,6 +114,10 @@ pub enum DomainAction {
     RequestWiperStart,
     /// Instruct the wiper actuator to stop wiping.
     RequestWiperStop,
+    SetTurnLights {
+        left_on: bool,
+        right_on: bool,
+    },
     /// Actor must start the listed assemblies (push startup `TurnBarrier`).
     /// Emitted on the `Off → PreparingToStart` transition.
     StartAssemblies(Vec<AssemblyId>),

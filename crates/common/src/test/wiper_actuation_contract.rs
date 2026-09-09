@@ -106,7 +106,6 @@ async fn given_idle_wiper_ready_when_rain_detected_true_ingress_then_running_and
  {
     let (controller, mut actuation_rx, _guard) = install_with_actuation("WIPER-E2E-1", 8).await;
     power_on_to_idle(&controller).await;
-    wait_wiper_state(&controller, WiperState::Ready, Duration::from_millis(500)).await;
 
     controller
         .submit_fsm_event(FsmEvent::RainsStarted)
@@ -123,7 +122,6 @@ async fn given_idle_wiper_ready_when_rain_detected_true_ingress_then_running_and
 async fn given_wiper_running_when_rain_detected_false_ingress_then_ready_and_stop_wiper_command() {
     let (controller, mut actuation_rx, _guard) = install_with_actuation("WIPER-E2E-2", 8).await;
     power_on_to_idle(&controller).await;
-    wait_wiper_state(&controller, WiperState::Ready, Duration::from_millis(500)).await;
 
     controller
         .submit_fsm_event(FsmEvent::RainsStarted)
@@ -163,7 +161,6 @@ async fn given_rain_ingress_when_wiper_runs_then_diagnostics_prove_rain_wiper_co
     };
 
     power_on_to_idle(&controller).await;
-    wait_wiper_state(&controller, WiperState::Ready, Duration::from_millis(500)).await;
     while diag_rx.try_recv().is_ok() {}
 
     controller

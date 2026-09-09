@@ -1,9 +1,10 @@
 use std::time::Duration;
 
 use common::facade::{
-    DiagnosticKind, DiagnosticLevel, DiagnosticRecord, PublishedDomainAction, PublishedFsmEvent,
-    PublishedFsmState, PublishedHeadlampContext, PublishedHeadlampState, PublishedHealthContext,
-    PublishedPowertrainContext, PublishedTransitionRecord, PublishedVehicleContext,
+    DiagnosticKind, DiagnosticLevel, DiagnosticRecord, PublishedBcmContext, PublishedBcmState,
+    PublishedDomainAction, PublishedFsmEvent, PublishedFsmState, PublishedHeadlampContext,
+    PublishedHeadlampState, PublishedHealthContext, PublishedPowertrainContext,
+    PublishedSccmContext, PublishedTransitionRecord, PublishedVehicleContext,
     PublishedVisibilityContext, PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext,
     PublishedWiperState, UnixTimestamp,
 };
@@ -45,6 +46,14 @@ pub fn sample_diagnostic() -> DiagnosticRecord {
 
 pub fn sample_ledger() -> PublishedTransitionRecord {
     let context = PublishedVehicleContext {
+        sccm: PublishedSccmContext {
+            hazard_button_on: false,
+        },
+        bcm: PublishedBcmContext {
+            state: PublishedBcmState::Ready,
+            left_turn_request_on: false,
+            right_turn_request_on: false,
+        },
         powertrain: PublishedPowertrainContext {
             wheel_rpm: PublishedWheelRpm {
                 front_left: 1,

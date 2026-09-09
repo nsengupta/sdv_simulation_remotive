@@ -45,10 +45,11 @@ pub use observation_records::transition::sink::{
     TokioMpscTransitionRecordSink, TransitionRecordSink, TransitionSinkError,
 };
 pub use observation_records::{
-    DiagnosticKind, DiagnosticLevel, DiagnosticRecord, PublishedDomainAction,
-    PublishedFrontHeadlampIncompleteCause, PublishedFrontHeadlampSwitchDirection,
-    PublishedFsmEvent, PublishedFsmState, PublishedHeadlampContext, PublishedHeadlampState,
-    PublishedHealthContext, PublishedPowertrainContext, PublishedTransitionRecord,
+    DiagnosticKind, DiagnosticLevel, DiagnosticRecord, PublishedBcmContext, PublishedBcmState,
+    PublishedDomainAction, PublishedFrontHeadlampIncompleteCause,
+    PublishedFrontHeadlampSwitchDirection, PublishedFsmEvent, PublishedFsmState,
+    PublishedHeadlampContext, PublishedHeadlampState, PublishedHealthContext,
+    PublishedPowertrainContext, PublishedSccmContext, PublishedTransitionRecord,
     PublishedVehicleContext, PublishedVisibilityContext, PublishedWeatherContext,
     PublishedWheelRpm, PublishedWiperContext, PublishedWiperState, SessionClock,
     elapsed_since_session,

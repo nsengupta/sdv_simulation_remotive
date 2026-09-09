@@ -14,6 +14,12 @@ mod observation_streams_contract;
 mod actor_contract;
 
 #[cfg(test)]
+mod bcm_contract;
+
+#[cfg(test)]
+mod bcm_actor_contract;
+
+#[cfg(test)]
 mod fsm_preparation_contract;
 
 #[cfg(test)]
@@ -45,6 +51,12 @@ mod lifecycle_signal_contract;
 
 #[cfg(test)]
 mod hazard_signal_contract;
+
+#[cfg(test)]
+mod hazard_fsm_contract;
+
+#[cfg(test)]
+mod hazard_observation_contract;
 
 #[cfg(test)]
 mod quiescence_actor_contract;

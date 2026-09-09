@@ -28,9 +28,7 @@ use crate::vehicle_state::{WiperContext, WiperMessage, WiperState, WiperZoneRepl
 /// Headlamp startup barrier = turn 2
 /// Wiper startup barrier = turn 3
 /// First user event = turn 4
-const HEADLAMP_STARTUP_TURN: u64 = 2;
-const WIPER_STARTUP_TURN: u64 = 3;
-const FIRST_USER_TURN: u64 = 4;
+const FIRST_USER_TURN: u64 = 3;
 
 /// Poll until the wiper assembly reaches `expected` state.
 pub async fn wait_wiper_state(
@@ -77,25 +75,6 @@ fn inject_wiper_zone_ready(controller: &VehicleController, turn_id: u64) {
             }),
         })
         .expect("inject_wiper_zone_ready");
-}
-
-fn inject_headlamp_zone_ready_startup(controller: &VehicleController) {
-    use crate::vehicle_state::{HeadlampContext, HeadlampState, HeadlampZoneReply};
-    controller
-        .get_actor_ref()
-        .send_message(TwinMessage::ZoneReady {
-            zone_id: AssemblyId::Headlamp,
-            turn_id: HEADLAMP_STARTUP_TURN,
-            tell_attempt: 0,
-            reply: ZoneReply::Headlamp(HeadlampZoneReply {
-                ctx: HeadlampContext {
-                    state: HeadlampState::Ready,
-                    ack_pending_since: None,
-                },
-                outcomes: vec![],
-            }),
-        })
-        .expect("inject_headlamp_zone_ready_startup");
 }
 
 async fn spawn_non_silent(identity: &str) -> (VehicleController, ActorGuard<TwinMessage>) {
@@ -190,8 +169,7 @@ async fn assert_no_row(
     }
 }
 
-/// Boot a silent-both controller to Idle by manually injecting both assembly ZoneReady replies.
-/// Drains the 3 resulting ledger rows: PowerOn + AssemblyZoneReady(Headlamp) + AssemblyZoneReady(Wiper).
+/// Boot with BCM as the sole lifecycle participant.
 async fn boot_silent_both(
     controller: &VehicleController,
     rx: &mut tokio::sync::mpsc::Receiver<
@@ -199,11 +177,8 @@ async fn boot_silent_both(
     >,
 ) {
     controller.send_power_on().await.expect("power on");
-    tokio::task::yield_now().await;
-    inject_headlamp_zone_ready_startup(controller);
-    inject_wiper_zone_ready(controller, WIPER_STARTUP_TURN);
     crate::test::wait_fsm_state(controller, FsmState::Idle, Duration::from_millis(500)).await;
-    drain_n(rx, 3, Duration::from_secs(3)).await;
+    drain_n(rx, 2, Duration::from_secs(3)).await;
 }
 
 // ── Test 1: AssemblyId::Wiper is distinct ─────────────────────────────────────────
@@ -305,22 +280,13 @@ fn given_wiper_running_when_become_off_then_off_directly() {
 
 // ── Test 8: Both assemblies included in startup barrier ───────────────────────
 
-/// Non-silent spawn; after `PowerOn` both twinlets must reach their `Ready` state.
-/// This verifies that `BecomeOn` is sent to both assemblies and both barriers drain.
+/// Legacy twinlets remain spawned but do not participate in the BCM-only barrier.
 #[tokio::test]
 async fn given_power_on_when_both_assemblies_reply_then_idle() {
     let (controller, _guard) = spawn_non_silent("WIPER-STARTUP-1").await;
 
     controller.send_power_on().await.expect("power on");
-
-    // Both assembly barriers must drain: headlamp → Ready, wiper → Ready.
-    crate::test::wait_headlamp_state(
-        &controller,
-        crate::fsm::HeadlampState::Ready,
-        Duration::from_millis(500),
-    )
-    .await;
-    wait_wiper_state(&controller, WiperState::Ready, Duration::from_millis(500)).await;
+    crate::test::wait_fsm_state(&controller, FsmState::Idle, Duration::from_millis(500)).await;
 
     let snapshot = controller
         .get_snapshot(Some(ractor::concurrency::Duration::from_millis(50)))
@@ -392,14 +358,10 @@ async fn given_headlamp_then_wiper_events_when_replies_out_of_order_then_fifo_co
 async fn given_silent_wiper_when_headlamp_lux_then_rains_then_headlamp_commits_first() {
     let (controller, mut rx, _guard) = spawn_silent_wiper("WIPER-SLOW-1").await;
 
-    // Boot: headlamp is non-silent (auto-replies); wiper is silent (needs manual inject).
-    // We inject wiper startup reply at turn 3 to reach Idle.
+    // Wiper is not a lifecycle participant, so BCM startup still reaches Idle.
     controller.send_power_on().await.expect("power on");
-    tokio::task::yield_now().await;
-    inject_wiper_zone_ready(&controller, WIPER_STARTUP_TURN);
     crate::test::wait_fsm_state(&controller, FsmState::Idle, Duration::from_millis(500)).await;
-    // Drain 3 boot rows: PowerOn + AssemblyZoneReady(Headlamp) + AssemblyZoneReady(Wiper).
-    drain_n(&mut rx, 3, Duration::from_secs(3)).await;
+    drain_n(&mut rx, 2, Duration::from_secs(3)).await;
 
     // Turn 4: lux → headlamp zone (non-silent headlamp auto-replies).
     controller

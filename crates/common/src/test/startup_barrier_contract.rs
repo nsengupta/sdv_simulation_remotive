@@ -21,11 +21,11 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::digital_twin::{TwinMessage, ZoneReply};
-use crate::fsm::{AssemblyId, FsmEvent, FsmState, HeadlampState};
+use crate::fsm::{AssemblyId, FsmEvent, FsmState};
 use crate::observation_records::{PublishedFsmEvent, PublishedFsmState};
 use crate::test::{ActorGuard, power_on_to_idle, wait_fsm_state};
 use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
-use crate::vehicle_state::{HeadlampContext, HeadlampZoneReply};
+use crate::vehicle_state::{BcmContext, BcmState, BcmZoneReply};
 use crate::{TwinIngressEvent, VehicleController, VssSignal};
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -36,24 +36,24 @@ const STARTUP_BARRIER_TURN: u64 = 2;
 /// Current startup allocates one barrier turn for each named assembly: headlamp and wiper.
 /// These counts keep direct IDs confined to the silent-zone test seam without exposing
 /// production turn-allocation internals.
-const STARTUP_ASSEMBLY_BARRIER_COUNT: u64 = 2;
+const STARTUP_ASSEMBLY_BARRIER_COUNT: u64 = 1;
 const QUEUED_POST_POWER_ON_INGRESS_COUNT: u64 = 4;
 
-fn zone_reply_with_state(state: HeadlampState) -> ZoneReply {
-    ZoneReply::Headlamp(HeadlampZoneReply {
-        ctx: HeadlampContext {
+fn zone_reply_with_state(state: BcmState) -> ZoneReply {
+    ZoneReply::Bcm(BcmZoneReply {
+        ctx: BcmContext {
             state,
-            ack_pending_since: None,
+            ..Default::default()
         },
         outcomes: vec![],
     })
 }
 
-fn inject_zone_ready(controller: &VehicleController, turn_id: u64, state: HeadlampState) {
+fn inject_zone_ready(controller: &VehicleController, turn_id: u64, state: BcmState) {
     controller
         .get_actor_ref()
         .send_message(TwinMessage::ZoneReady {
-            zone_id: AssemblyId::Headlamp,
+            zone_id: AssemblyId::Bcm,
             turn_id,
             tell_attempt: 0,
             reply: zone_reply_with_state(state),
@@ -75,7 +75,7 @@ async fn spawn_non_silent(identity: &str) -> (VehicleController, ActorGuard<Twin
 
 async fn spawn_silent(identity: &str) -> (VehicleController, ActorGuard<TwinMessage>) {
     let opts = VehicleControllerRuntimeOptions {
-        test_silent_headlamp: true,
+        test_silent_bcm: true,
         ..Default::default()
     };
     let (controller, handle) =
@@ -160,7 +160,7 @@ async fn given_power_off_with_silent_headlamp_then_fsm_stays_in_preparing_to_sto
     // will not send.
     controller.send_power_on().await.expect("power on");
     tokio::task::yield_now().await;
-    inject_zone_ready(&controller, STARTUP_BARRIER_TURN, HeadlampState::Ready);
+    inject_zone_ready(&controller, STARTUP_BARRIER_TURN, BcmState::Ready);
     wait_fsm_state(&controller, FsmState::Idle, Duration::from_millis(500)).await;
 
     // Now try to power off — silent headlamp will not reply to BecomeOff.
@@ -189,7 +189,7 @@ async fn given_ingress_immediately_after_power_on_when_startup_unblocks_then_com
     let (transition_tx, mut transition_rx) = mpsc::channel(32);
     let opts = VehicleControllerRuntimeOptions {
         transition_tx: Some(transition_tx),
-        test_silent_headlamp: true,
+        test_silent_bcm: true,
         ..Default::default()
     };
     let (controller, handle) =
@@ -240,7 +240,7 @@ async fn given_ingress_immediately_after_power_on_when_startup_unblocks_then_com
         "later turns must remain blocked"
     );
 
-    inject_zone_ready(&controller, STARTUP_BARRIER_TURN, HeadlampState::Ready);
+    inject_zone_ready(&controller, STARTUP_BARRIER_TURN, BcmState::Ready);
     let deadline = std::time::Instant::now() + Duration::from_millis(500);
     loop {
         let snapshot = controller
@@ -259,7 +259,7 @@ async fn given_ingress_immediately_after_power_on_when_startup_unblocks_then_com
     }
 
     let mut rows = Vec::new();
-    for _ in 0..6 {
+    for _ in 0..5 {
         rows.push(
             transition_rx
                 .recv()
@@ -267,15 +267,15 @@ async fn given_ingress_immediately_after_power_on_when_startup_unblocks_then_com
                 .expect("ordered startup/user row"),
         );
     }
-    assert_eq!(rows[2].event, PublishedFsmEvent::UpdateAmbientLux(900));
-    assert_eq!(rows[2].old_state, PublishedFsmState::Idle);
-    assert_eq!(rows[3].event, PublishedFsmEvent::UpdateRpm(1200));
-    assert_eq!(rows[3].next_state, PublishedFsmState::Driving);
-    assert_eq!(rows[4].event, PublishedFsmEvent::UpdateRpm(0));
-    assert_eq!(rows[4].next_state, PublishedFsmState::Idle);
-    assert_eq!(rows[5].event, PublishedFsmEvent::PowerOff);
+    assert_eq!(rows[1].event, PublishedFsmEvent::UpdateAmbientLux(900));
+    assert_eq!(rows[1].old_state, PublishedFsmState::Idle);
+    assert_eq!(rows[2].event, PublishedFsmEvent::UpdateRpm(1200));
+    assert_eq!(rows[2].next_state, PublishedFsmState::Driving);
+    assert_eq!(rows[3].event, PublishedFsmEvent::UpdateRpm(0));
+    assert_eq!(rows[3].next_state, PublishedFsmState::Idle);
+    assert_eq!(rows[4].event, PublishedFsmEvent::PowerOff);
     assert!(matches!(
-        rows[5].next_state,
+        rows[4].next_state,
         PublishedFsmState::PreparingToStop
     ));
 
@@ -283,13 +283,8 @@ async fn given_ingress_immediately_after_power_on_when_startup_unblocks_then_com
     // the first shutdown assembly barrier (headlamp).
     const QUEUED_SHUTDOWN_HEADLAMP_TURN: u64 =
         STARTUP_BARRIER_TURN + STARTUP_ASSEMBLY_BARRIER_COUNT + QUEUED_POST_POWER_ON_INGRESS_COUNT;
-    inject_zone_ready(
-        &controller,
-        QUEUED_SHUTDOWN_HEADLAMP_TURN,
-        HeadlampState::Off,
-    );
+    inject_zone_ready(&controller, QUEUED_SHUTDOWN_HEADLAMP_TURN, BcmState::Off);
     wait_fsm_state(&controller, FsmState::Off, Duration::from_millis(500)).await;
-    let _headlamp_off = transition_rx.recv().await.expect("headlamp shutdown row");
-    let final_off = transition_rx.recv().await.expect("wiper shutdown row");
+    let final_off = transition_rx.recv().await.expect("BCM shutdown row");
     assert_eq!(final_off.next_state, PublishedFsmState::Off);
 }

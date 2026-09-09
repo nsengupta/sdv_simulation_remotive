@@ -106,8 +106,9 @@ mod ansi {
 mod tests {
     use super::*;
     use common::facade::{
-        PublishedDomainAction, PublishedFsmEvent, PublishedFsmState, PublishedHeadlampContext,
-        PublishedHeadlampState, PublishedHealthContext, PublishedPowertrainContext,
+        PublishedBcmContext, PublishedBcmState, PublishedDomainAction, PublishedFsmEvent,
+        PublishedFsmState, PublishedHeadlampContext, PublishedHeadlampState,
+        PublishedHealthContext, PublishedPowertrainContext, PublishedSccmContext,
         PublishedTransitionRecord, PublishedVehicleContext, PublishedVisibilityContext,
         PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
         UnixTimestamp,
@@ -131,6 +132,14 @@ mod tests {
 
     fn empty_ctx() -> PublishedVehicleContext {
         PublishedVehicleContext {
+            sccm: PublishedSccmContext {
+                hazard_button_on: false,
+            },
+            bcm: PublishedBcmContext {
+                state: PublishedBcmState::Off,
+                left_turn_request_on: false,
+                right_turn_request_on: false,
+            },
             powertrain: PublishedPowertrainContext {
                 wheel_rpm: PublishedWheelRpm {
                     front_left: 0,

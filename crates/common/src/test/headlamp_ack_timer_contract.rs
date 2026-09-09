@@ -5,9 +5,7 @@ use std::time::Duration;
 
 use crate::VehicleController;
 use crate::fsm::{FsmEvent, FsmState, HeadlampState};
-use crate::observation_records::transition::{
-    PublishedDomainAction, PublishedFsmEvent, PublishedFsmState, PublishedOperational,
-};
+use crate::observation_records::transition::{PublishedFsmEvent, PublishedFsmState};
 use crate::test::{
     ActorGuard, power_on_to_idle, submit_daylight_ambient, wait_fsm_state, wait_headlamp_state,
 };
@@ -35,14 +33,10 @@ async fn given_actor_driving_in_dark_when_ack_wait_elapses_without_timer_tick_th
         handle,
     };
 
-    // bridge to Idle, drain THREE startup rows (PowerOn + Headlamp Ready + Wiper Ready).
+    // bridge to Idle, drain BCM-only startup rows.
     power_on_to_idle(&controller).await;
     let _ = rx.recv().await.expect("power on → preparing row");
-    let _ = rx
-        .recv()
-        .await
-        .expect("headlamp zone ready → preparing row");
-    let _ = rx.recv().await.expect("wiper zone ready → idle row");
+    let _ = rx.recv().await.expect("BCM zone ready → idle row");
 
     submit_daylight_ambient(&controller).await;
     let _ = rx.recv().await.expect("bright lux row");
@@ -72,8 +66,6 @@ async fn given_actor_driving_in_dark_when_ack_wait_elapses_without_timer_tick_th
         .recv()
         .await
         .expect("spontaneous incomplete hop ledger row");
-    let hop2 = rx.recv().await.expect("internal hop ledger row");
-
     assert!(
         matches!(
             hop1.event,
@@ -83,25 +75,11 @@ async fn given_actor_driving_in_dark_when_ack_wait_elapses_without_timer_tick_th
         hop1.event
     );
     assert_eq!(hop1.next_state, PublishedFsmState::Driving);
-    assert!(matches!(
-        hop2.event,
-        PublishedFsmEvent::Internal(PublishedOperational::LightingUnsafe)
-    ));
-    assert_eq!(hop2.next_state, PublishedFsmState::DrivingDangerously);
     assert!(
-        hop2.actions
-            .iter()
-            .any(|a| matches!(a, PublishedDomainAction::StartBuzzer)),
-        "internal hop row must carry StartBuzzer, got {:?}",
-        hop2.actions
+        rx.try_recv().is_err(),
+        "LightingUnsafe is disabled in Phase I"
     );
-
-    wait_fsm_state(
-        &controller,
-        FsmState::DrivingDangerously,
-        Duration::from_secs(1),
-    )
-    .await;
+    wait_fsm_state(&controller, FsmState::Driving, Duration::from_secs(1)).await;
     // ActuationIncomplete(On) recovers to Ready (assembly active), not Off.
     wait_headlamp_state(&controller, HeadlampState::Ready, Duration::from_secs(1)).await;
 }
@@ -127,14 +105,10 @@ async fn given_actor_on_requested_when_ack_before_deadline_then_no_spontaneous_i
         handle,
     };
 
-    // bridge to Idle, drain THREE startup rows (PowerOn + Headlamp Ready + Wiper Ready).
+    // bridge to Idle, drain BCM-only startup rows.
     power_on_to_idle(&controller).await;
     let _ = rx.recv().await.expect("power on → preparing row");
-    let _ = rx
-        .recv()
-        .await
-        .expect("headlamp zone ready → preparing row");
-    let _ = rx.recv().await.expect("wiper zone ready → idle row");
+    let _ = rx.recv().await.expect("BCM zone ready → idle row");
 
     controller
         .submit_fsm_event(FsmEvent::UpdateAmbientLux(20))

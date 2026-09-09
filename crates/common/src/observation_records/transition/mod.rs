@@ -27,9 +27,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::fsm::{DomainAction, FsmEvent, FsmState, RawTransitionRecord};
 use crate::vehicle_state::{
-    FrontHeadlampIncompleteCause, FrontHeadlampSwitchDirection, HeadlampContext, HeadlampState,
-    PowertrainContext, VehicleContext, VehicleHealthContext, VisibilityContext, WheelRpm,
-    WiperState,
+    BcmState, FrontHeadlampIncompleteCause, FrontHeadlampSwitchDirection, HeadlampContext,
+    HeadlampState, PowertrainContext, VehicleContext, VehicleHealthContext, VisibilityContext,
+    WheelRpm, WiperState,
 };
 
 /// Wall-clock instant since the Unix Epoch, for Twin-authored observation records.
@@ -231,6 +231,7 @@ pub enum PublishedDomainAction {
     RequestFrontHeadlampOff,
     RequestWiperStart,
     RequestWiperStop,
+    SetTurnLights { left_on: bool, right_on: bool },
 }
 
 impl PublishedDomainAction {
@@ -245,6 +246,10 @@ impl PublishedDomainAction {
             DomainAction::RequestFrontHeadlampOff => Some(Self::RequestFrontHeadlampOff),
             DomainAction::RequestWiperStart => Some(Self::RequestWiperStart),
             DomainAction::RequestWiperStop => Some(Self::RequestWiperStop),
+            DomainAction::SetTurnLights { left_on, right_on } => Some(Self::SetTurnLights {
+                left_on: *left_on,
+                right_on: *right_on,
+            }),
             // Internal coordination signals: not domain intents, not ledger-visible.
             DomainAction::StartAssemblies(_) | DomainAction::StopAssemblies(_) => None,
         }
@@ -387,6 +392,52 @@ impl From<&crate::vehicle_state::WiperContext> for PublishedWiperContext {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublishedSccmContext {
+    pub hazard_button_on: bool,
+}
+
+impl From<&crate::vehicle_state::SccmContext> for PublishedSccmContext {
+    fn from(s: &crate::vehicle_state::SccmContext) -> Self {
+        Self {
+            hazard_button_on: s.hazard_button_on,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublishedBcmState {
+    Off,
+    Ready,
+}
+
+impl From<&BcmState> for PublishedBcmState {
+    fn from(s: &BcmState) -> Self {
+        match s {
+            BcmState::Off => Self::Off,
+            BcmState::Ready => Self::Ready,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublishedBcmContext {
+    pub state: PublishedBcmState,
+    pub left_turn_request_on: bool,
+    pub right_turn_request_on: bool,
+}
+
+impl From<&crate::vehicle_state::BcmContext> for PublishedBcmContext {
+    fn from(b: &crate::vehicle_state::BcmContext) -> Self {
+        Self {
+            state: (&b.state).into(),
+            left_turn_request_on: b.left_turn_request_on,
+            right_turn_request_on: b.right_turn_request_on,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PublishedHeadlampContext {
     pub state: PublishedHeadlampState,
@@ -405,6 +456,8 @@ impl PublishedHeadlampContext {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PublishedVehicleContext {
+    pub sccm: PublishedSccmContext,
+    pub bcm: PublishedBcmContext,
     pub powertrain: PublishedPowertrainContext,
     pub health: PublishedHealthContext,
     pub visibility: PublishedVisibilityContext,
@@ -416,6 +469,8 @@ pub struct PublishedVehicleContext {
 impl PublishedVehicleContext {
     pub(crate) fn project(ctx: &VehicleContext, clock: &SessionClock) -> Self {
         Self {
+            sccm: (&ctx.sccm).into(),
+            bcm: (&ctx.bcm).into(),
             powertrain: (&ctx.powertrain).into(),
             health: (&ctx.health).into(),
             visibility: (&ctx.visibility).into(),

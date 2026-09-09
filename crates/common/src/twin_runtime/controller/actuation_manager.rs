@@ -130,6 +130,8 @@ impl ActuationManager for DefaultActuationManager {
                     let _ = tx.send(ActuationCommand::StopWiper).await;
                 }
             }
+            // Phase I keeps the atomic intent in-process and observable only.
+            DomainAction::SetTurnLights { .. } => {}
             // StartAssemblies / StopAssemblies are intercepted by `apply_committed_quiescence`
             // in `virtual_car_actor.rs` before they reach the actuation manager, so this arm
             // is unreachable in production. It remains for `DomainAction` match exhaustiveness.

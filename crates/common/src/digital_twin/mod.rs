@@ -204,12 +204,30 @@ pub enum TwinMessage {
 /// Generic zone tell-back envelope — wraps zone-specific reply types.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ZoneReply {
+    Bcm(crate::vehicle_state::BcmZoneReply),
     Headlamp(crate::vehicle_state::HeadlampZoneReply),
     /// wiper zone reply.
     Wiper(crate::vehicle_state::WiperZoneReply),
 }
 
 impl ZoneReply {
+    pub(crate) fn matches_assembly(&self, assembly_id: crate::fsm::AssemblyId) -> bool {
+        matches!(
+            (self, assembly_id),
+            (Self::Bcm(_), crate::fsm::AssemblyId::Bcm)
+                | (Self::Headlamp(_), crate::fsm::AssemblyId::Headlamp)
+                | (Self::Wiper(_), crate::fsm::AssemblyId::Wiper)
+        )
+    }
+
+    pub fn as_bcm(&self) -> Option<&crate::vehicle_state::BcmZoneReply> {
+        if let ZoneReply::Bcm(r) = self {
+            Some(r)
+        } else {
+            None
+        }
+    }
+
     /// Borrow the inner [`HeadlampZoneReply`] if this is a headlamp reply.
     pub fn as_headlamp(&self) -> Option<&crate::vehicle_state::HeadlampZoneReply> {
         if let ZoneReply::Headlamp(r) = self {
@@ -237,6 +255,7 @@ impl ZoneReply {
 /// `pub(crate)` — not part of the external crate API.
 #[derive(Debug, Clone)]
 pub(crate) enum ZoneMessage {
+    Bcm(crate::vehicle_state::BcmMessage),
     Headlamp(crate::vehicle_state::HeadlampMessage),
     Wiper(crate::vehicle_state::WiperMessage),
 }

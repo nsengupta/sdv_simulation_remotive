@@ -2,7 +2,7 @@
 
 use crate::fsm::DomainAction;
 use crate::twin_runtime::zone_turn::ZoneOutcome;
-use crate::vehicle_state::{HeadlampOutcome, WiperOutcome};
+use crate::vehicle_state::{BcmOutcome, HeadlampOutcome, WiperOutcome};
 
 pub fn zone_outcomes_to_domain_actions(
     outcomes: impl IntoIterator<Item = ZoneOutcome>,
@@ -10,10 +10,19 @@ pub fn zone_outcomes_to_domain_actions(
     outcomes
         .into_iter()
         .filter_map(|o| match o {
+            ZoneOutcome::Bcm(bo) => Some(bcm_outcome_to_domain_action(bo)),
             ZoneOutcome::Headlamp(ho) => headlamp_outcome_to_domain_action(ho),
             ZoneOutcome::Wiper(wo) => wiper_outcome_to_domain_action(wo),
         })
         .collect()
+}
+
+fn bcm_outcome_to_domain_action(outcome: BcmOutcome) -> DomainAction {
+    match outcome {
+        BcmOutcome::TurnLightsChanged { left_on, right_on } => {
+            DomainAction::SetTurnLights { left_on, right_on }
+        }
+    }
 }
 
 fn headlamp_outcome_to_domain_action(outcome: HeadlampOutcome) -> Option<DomainAction> {

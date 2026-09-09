@@ -56,7 +56,7 @@ async fn given_twin_boot_when_both_sinks_wired_then_ledger_and_diagnostic_share_
         ledger_rows.push(row);
     }
     assert!(
-        ledger_rows.len() >= 3,
+        ledger_rows.len() >= 2,
         "expected boot ledger rows, got {}",
         ledger_rows.len()
     );

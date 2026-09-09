@@ -19,6 +19,7 @@ pub use crate::signals::{ControlSignal, LifecycleCommand, VssSignal};
 // --- Read model (snapshots + observable assembly state) ---
 
 pub use crate::digital_twin::CarSnapshot;
+pub use crate::vehicle_state::BcmState;
 /// Headlamp zone state on [`CarSnapshot::context`] (L1).
 pub use crate::vehicle_state::HeadlampState;
 /// Wiper zone state on [`CarSnapshot::context`] (L1).
@@ -31,12 +32,13 @@ pub use crate::observation_records::diagnostic::{
     DiagnosticKind, DiagnosticLevel, DiagnosticRecord,
 };
 pub use crate::observation_records::transition::{
-    PublishedDomainAction, PublishedFrontHeadlampIncompleteCause,
-    PublishedFrontHeadlampSwitchDirection, PublishedFsmEvent, PublishedFsmState,
-    PublishedHeadlampContext, PublishedHeadlampState, PublishedHealthContext, PublishedOperational,
-    PublishedPowertrainContext, PublishedTransitionRecord, PublishedVehicleContext,
-    PublishedVisibilityContext, PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext,
-    PublishedWiperState, UnixTimestamp,
+    PublishedBcmContext, PublishedBcmState, PublishedDomainAction,
+    PublishedFrontHeadlampIncompleteCause, PublishedFrontHeadlampSwitchDirection,
+    PublishedFsmEvent, PublishedFsmState, PublishedHeadlampContext, PublishedHeadlampState,
+    PublishedHealthContext, PublishedOperational, PublishedPowertrainContext, PublishedSccmContext,
+    PublishedTransitionRecord, PublishedVehicleContext, PublishedVisibilityContext,
+    PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
+    UnixTimestamp,
 };
 
 // --- Headlamp ingress/egress log tokens (gateway CAN loop display) ---

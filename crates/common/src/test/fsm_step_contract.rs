@@ -131,10 +131,7 @@ fn test_step_standard_commute_flow() {
         (FsmEvent::PowerOn, |s| {
             matches!(s, FsmState::PreparingToStart { .. })
         }),
-        (FsmEvent::AssemblyZoneReady(AssemblyId::Headlamp), |s| {
-            matches!(s, FsmState::PreparingToStart { .. })
-        }),
-        (FsmEvent::AssemblyZoneReady(AssemblyId::Wiper), |s| {
+        (FsmEvent::AssemblyZoneReady(AssemblyId::Bcm), |s| {
             matches!(s, FsmState::Idle)
         }),
         (FsmEvent::UpdateRpm(1500), |s| {
@@ -147,10 +144,7 @@ fn test_step_standard_commute_flow() {
         (FsmEvent::PowerOff, |s| {
             matches!(s, FsmState::PreparingToStop { .. })
         }),
-        (FsmEvent::AssemblyZoneReady(AssemblyId::Headlamp), |s| {
-            matches!(s, FsmState::PreparingToStop { .. })
-        }),
-        (FsmEvent::AssemblyZoneReady(AssemblyId::Wiper), |s| {
+        (FsmEvent::AssemblyZoneReady(AssemblyId::Bcm), |s| {
             matches!(s, FsmState::Off)
         }),
     ];
@@ -177,11 +171,10 @@ fn test_state_laws_hold_over_a_legal_journey_and_records_carry_intents() {
     let mut reached_warning = false;
 
     // PowerOn bridges via PreparingToStart before Idle.
-    // step initialises remaining_assemblies={Headlamp, Wiper}; both barriers must drain.
+    // Phase I lifecycle waits only for BCM.
     for event in [
         FsmEvent::PowerOn,
-        FsmEvent::AssemblyZoneReady(AssemblyId::Headlamp),
-        FsmEvent::AssemblyZoneReady(AssemblyId::Wiper),
+        FsmEvent::AssemblyZoneReady(AssemblyId::Bcm),
         FsmEvent::UpdateRpm(1500),
         FsmEvent::UpdateRpm(5600),
     ] {

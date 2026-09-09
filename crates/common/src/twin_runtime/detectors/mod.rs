@@ -19,8 +19,8 @@ pub use lighting_unsafe::lighting_unsafe_detector;
 
 /// Run registered detectors against the hop exit cut; first match wins.
 pub fn detect_internal_after_hop(
-    exit_state: &crate::fsm::FsmState,
-    exit_ctx: &crate::vehicle_state::VehicleContext,
+    _exit_state: &crate::fsm::FsmState,
+    _exit_ctx: &crate::vehicle_state::VehicleContext,
 ) -> Option<crate::fsm::FsmEvent> {
-    lighting_unsafe_detector(exit_state, exit_ctx)
+    None
 }

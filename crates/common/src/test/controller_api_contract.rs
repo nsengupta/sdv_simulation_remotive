@@ -102,9 +102,8 @@ async fn given_applied_events_when_get_snapshot_then_as_of_seq_counts_every_even
         "PowerOn → PreparingToStart is seq 1"
     );
 
-    // startup barrier drains for BOTH assemblies.
-    // seq 2: AssemblyZoneReady(Headlamp) → PreparingToStart (Wiper still pending)
-    // seq 3: AssemblyZoneReady(Wiper) → Idle
+    // Phase I startup barrier drains for BCM only.
+    // seq 2: AssemblyZoneReady(Bcm) → Idle
     wait_fsm_state(&controller, FsmState::Idle, Duration::from_millis(500)).await;
     let after_idle = controller
         .get_snapshot(Some(Duration::from_millis(250)))
@@ -112,11 +111,11 @@ async fn given_applied_events_when_get_snapshot_then_as_of_seq_counts_every_even
         .expect("snapshot");
     assert_eq!(
         after_idle.as_of_seq(),
-        3,
-        "AssemblyZoneReady(Wiper) → Idle is seq 3"
+        2,
+        "AssemblyZoneReady(Bcm) → Idle is seq 2"
     );
 
-    // RPM in dark (default lux=0): zone hop (seq 4) + LightingUnsafe internal hop (seq 5).
+    // RPM in dark: one zone hop; LightingUnsafe registration is disabled in Phase I.
     controller
         .submit_twin_ingress(TwinIngressEvent::Telemetry(crate::VssSignal::EngineRpm(
             1500,
@@ -129,15 +128,15 @@ async fn given_applied_events_when_get_snapshot_then_as_of_seq_counts_every_even
         .expect("snapshot");
     assert_eq!(
         after_rpm.as_of_seq(),
-        5,
-        "dark driving entry emits zone hop (seq 4) + internal LightingUnsafe hop (seq 5)"
+        3,
+        "dark driving entry emits one RPM row"
     );
     // A pure query does not advance the ledger.
     let again = controller
         .get_snapshot(Some(Duration::from_millis(250)))
         .await
         .expect("snapshot");
-    assert_eq!(again.as_of_seq(), 5);
+    assert_eq!(again.as_of_seq(), 3);
 }
 
 #[tokio::test]

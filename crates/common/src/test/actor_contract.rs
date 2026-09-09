@@ -106,8 +106,7 @@ async fn power_off_while_off_is_silent_then_power_on_starts_normally() {
 
 #[tokio::test]
 async fn scenario_raw_transition_records_are_emitted_in_order() {
-    // PowerOn → PreparingToStart (seq 1), AssembliesReady → Idle (seq 2),
-    // then UpdateRpm(1500) → Driving (seq 3).
+    // PowerOn → PreparingToStart, BCM ready → Idle, then user events.
     let (tx, mut rx) = mpsc::channel(16);
 
     let runtime_options = VehicleControllerRuntimeOptions {
@@ -127,19 +126,13 @@ async fn scenario_raw_transition_records_are_emitted_in_order() {
         handle,
     };
 
-    // Off → PreparingToStart → {AssemblyZoneReady(Headlamp)} →
-    // {AssemblyZoneReady(Wiper)} → Idle produces THREE ledger rows.
-    // Drain all three before queuing user events.
+    // BCM-only startup produces two ledger rows.
     power_on_to_idle(&controller).await;
     let row1 = rx.recv().await.expect("Missing row 1 (PowerOn)");
     let row2 = rx
         .recv()
         .await
-        .expect("Missing row 2 (AssemblyZoneReady Headlamp)");
-    let row3 = rx
-        .recv()
-        .await
-        .expect("Missing row 3 (AssemblyZoneReady Wiper → Idle)");
+        .expect("Missing row 2 (AssemblyZoneReady BCM → Idle)");
 
     // Now queue lux + rpm events; actor is in Idle.
     actor_ref
@@ -151,35 +144,31 @@ async fn scenario_raw_transition_records_are_emitted_in_order() {
         .send_message(FsmEvent::UpdateRpm(1500).into())
         .expect("Failed to send UpdateRpm stimulus");
 
-    let row4 = rx.recv().await.expect("Missing row 4 (lux)");
-    let row5 = rx.recv().await.expect("Missing row 5 (rpm)");
+    let row3 = rx.recv().await.expect("Missing row 3 (lux)");
+    let row4 = rx.recv().await.expect("Missing row 4 (rpm)");
 
     assert_eq!(row1.record_seq, 1);
     assert_eq!(row1.event, PublishedFsmEvent::PowerOn);
     assert_eq!(row1.old_state, PublishedFsmState::Off);
     assert_eq!(row1.next_state, PublishedFsmState::PreparingToStart);
 
-    // Row 2: AssemblyZoneReady(Headlamp) — stays in PreparingToStart (Wiper still pending).
+    // Row 2: AssemblyZoneReady(Bcm) completes startup.
     assert_eq!(row2.record_seq, 2);
-    assert_eq!(row2.next_state, PublishedFsmState::PreparingToStart);
+    assert_eq!(row2.next_state, PublishedFsmState::Idle);
 
-    // Row 3: AssemblyZoneReady(Wiper) — both assemblies ready; transitions to Idle.
+    // Lux row (seq 3) keeps the FSM in Idle.
     assert_eq!(row3.record_seq, 3);
-    assert_eq!(row3.next_state, PublishedFsmState::Idle);
 
-    // Lux row (seq 4) keeps the FSM in Idle (no state change from bright lux).
+    // RPM row (seq 4) advances to Driving.
     assert_eq!(row4.record_seq, 4);
-
-    // RPM row (seq 5) advances to Driving.
-    assert_eq!(row5.record_seq, 5);
-    assert_eq!(row5.event, PublishedFsmEvent::UpdateRpm(1500));
-    assert_eq!(row5.old_state, PublishedFsmState::Idle);
-    assert_eq!(row5.next_state, PublishedFsmState::Driving);
-    assert_eq!(row5.current_ctx.powertrain.wheel_rpm.front_left, 1500);
+    assert_eq!(row4.event, PublishedFsmEvent::UpdateRpm(1500));
+    assert_eq!(row4.old_state, PublishedFsmState::Idle);
+    assert_eq!(row4.next_state, PublishedFsmState::Driving);
+    assert_eq!(row4.current_ctx.powertrain.wheel_rpm.front_left, 1500);
 
     // All records share one run (session epoch) and advance monotonically in wall time.
-    assert_eq!(row1.session_started_at, row5.session_started_at);
-    assert!(row5.recorded_at >= row1.recorded_at);
+    assert_eq!(row1.session_started_at, row4.session_started_at);
+    assert!(row4.recorded_at >= row1.recorded_at);
 
     let twin_snapshot = actor_ref
         .call(
@@ -192,15 +181,15 @@ async fn scenario_raw_transition_records_are_emitted_in_order() {
 
     let ctx = twin_snapshot.context();
     assert_eq!(
-        row5.current_ctx.powertrain.wheel_rpm.front_left, ctx.powertrain.wheel_rpm.front_left,
+        row4.current_ctx.powertrain.wheel_rpm.front_left, ctx.powertrain.wheel_rpm.front_left,
         "emitted current_ctx must match persisted actor context after transition"
     );
     assert_eq!(
-        row5.current_ctx.powertrain.speed_kph,
+        row4.current_ctx.powertrain.speed_kph,
         ctx.powertrain.speed_kph
     );
     assert_eq!(
-        row5.current_ctx.visibility.ambient_lux,
+        row4.current_ctx.visibility.ambient_lux,
         ctx.visibility.ambient_lux
     );
 }

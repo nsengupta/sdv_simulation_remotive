@@ -4,13 +4,16 @@
 //! **L1 handler pattern:** `{Zone}Context::on_receiving_message(msg, now) -> {Zone}ZoneReply` (headlamp
 //! first). Zones import L0 only — no L2/L4.
 
+pub mod bcm;
 pub mod front_headlamp;
 pub mod health;
 pub mod powertrain;
+pub mod sccm;
 pub mod visibility;
 pub mod weather;
 pub mod wiper;
 
+pub use bcm::{BcmContext, BcmMessage, BcmOutcome, BcmState, BcmZoneReply};
 pub use front_headlamp::{
     FrontHeadlampIncompleteCause, FrontHeadlampSwitchDirection, HeadlampContext, HeadlampMessage,
     HeadlampOutcome, HeadlampState, HeadlampZoneReply,
@@ -20,6 +23,7 @@ pub use powertrain::{
     PowertrainContext, PowertrainMessage, PowertrainMode, PowertrainOutcome, PowertrainState,
     WheelRpm,
 };
+pub use sccm::SccmContext;
 pub use visibility::{VisibilityContext, VisibilityMessage, VisibilityOutcome, VisibilityState};
 pub use weather::WeatherContext;
 pub use wiper::{WiperContext, WiperMessage, WiperOutcome, WiperState, WiperZoneReply};
@@ -35,6 +39,8 @@ pub use wiper::{WiperContext, WiperMessage, WiperOutcome, WiperState, WiperZoneR
 /// carries any FSM lifecycle state.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct VehicleContext {
+    pub sccm: SccmContext,
+    pub bcm: BcmContext,
     pub powertrain: PowertrainContext,
     pub health: VehicleHealthContext,
     pub visibility: VisibilityContext,

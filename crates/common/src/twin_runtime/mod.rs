@@ -1,3 +1,4 @@
+pub mod bcm_actor;
 pub mod connectors;
 pub mod constants;
 pub mod controller;
@@ -11,6 +12,7 @@ pub mod zone_replies;
 pub mod zone_tell_back;
 pub mod zone_turn;
 
+pub use bcm_actor::{BcmActor, BcmActorMsg, BcmActorVocabulary, tell_bcm_zone};
 pub use headlamp_actor::{
     HeadlampActor, HeadlampActorMsg, HeadlampActorVocabulary, tell_headlamp_zone,
 };

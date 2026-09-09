@@ -11,13 +11,7 @@ use crate::digital_twin::TwinMessage;
 use crate::fsm::FsmState;
 use crate::observation_records::diagnostic::DiagnosticRecord;
 use crate::test::{ActorGuard, wait_fsm_state};
-use crate::twin_runtime::constants::{ZONE_TELL_BACK_ATTEMPT_COUNT, ZONE_TELL_BACK_WAIT};
 use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
-
-/// Total time for one tell-back cycle to exhaust (initial + all retries).
-fn full_exhaustion_budget() -> Duration {
-    ZONE_TELL_BACK_WAIT * (ZONE_TELL_BACK_ATTEMPT_COUNT + 1)
-}
 
 /// Drain the diagnostic channel, returning all messages received within `window`.
 async fn drain_diagnostics(
@@ -36,7 +30,7 @@ async fn drain_diagnostics(
 }
 
 #[tokio::test]
-async fn given_silent_wiper_when_startup_tell_back_exhausted_then_warning_on_diagnostic_stream() {
+async fn given_silent_wiper_when_powering_on_then_bcm_only_startup_reaches_idle_without_warning() {
     let (diag_tx, mut diag_rx) = mpsc::unbounded_channel::<DiagnosticRecord>();
     let opts = VehicleControllerRuntimeOptions {
         diagnostic_tx: Some(diag_tx),
@@ -52,11 +46,10 @@ async fn given_silent_wiper_when_startup_tell_back_exhausted_then_warning_on_dia
         handle,
     };
 
-    // Power on → starts the startup assembly barriers; wiper stays silent.
+    // Wiper is retained for compatibility but is not a lifecycle participant.
     controller.send_power_on().await.expect("power on");
 
-    // FSM must reach Idle once the headlamp barrier drains (wiper will use synthetic reply).
-    wait_fsm_state(&controller, FsmState::Idle, full_exhaustion_budget() * 3).await;
+    wait_fsm_state(&controller, FsmState::Idle, Duration::from_millis(500)).await;
 
     // Collect all diagnostics that arrived by now.
     let messages = drain_diagnostics(&mut diag_rx, Duration::from_millis(50)).await;
@@ -69,7 +62,7 @@ async fn given_silent_wiper_when_startup_tell_back_exhausted_then_warning_on_dia
             )
     });
     assert!(
-        has_wiper_warning,
-        "expected a Warn-level diagnostic mentioning 'wiper' after tell-back exhaustion, got: {messages:#?}"
+        !has_wiper_warning,
+        "wiper must not join startup: {messages:#?}"
     );
 }

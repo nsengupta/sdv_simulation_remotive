@@ -216,13 +216,10 @@ fn test_preparing_to_start_carries_assembly_ids() {
         panic!("expected PreparingToStart, got {:?}", result.next_state);
     };
     assert!(
-        remaining.contains(&AssemblyId::Headlamp),
-        "Headlamp must be in the remaining set"
+        remaining.contains(&AssemblyId::Bcm),
+        "BCM must be in the remaining set"
     );
-    assert!(
-        remaining.contains(&AssemblyId::Wiper),
-        "Wiper must be in the remaining set"
-    );
+    assert_eq!(remaining.len(), 1);
 }
 
 #[test]
@@ -231,8 +228,7 @@ fn test_preparing_to_stop_carries_assembly_ids() {
     let FsmState::PreparingToStop(remaining) = &result.next_state else {
         panic!("expected PreparingToStop, got {:?}", result.next_state);
     };
-    assert!(remaining.contains(&AssemblyId::Headlamp));
-    assert!(remaining.contains(&AssemblyId::Wiper));
+    assert_eq!(remaining, &BTreeSet::from([AssemblyId::Bcm]));
 }
 
 #[test]
@@ -263,33 +259,26 @@ fn test_state_and_action_agree_on_assembly_set() {
 
 #[test]
 fn test_assembly_zone_ready_shrinks_state_not_context() {
-    // After PowerOn: PreparingToStart({Headlamp, Wiper}).
-    // After AssemblyZoneReady(Headlamp): PreparingToStart({Wiper}).
+    // After PowerOn: PreparingToStart({Bcm}).
+    // After AssemblyZoneReady(Bcm): Idle.
     // The countdown lives in the state; VehicleContext carries no separate field.
     let power_on = step(&FsmState::Off, &ctx(), &FsmEvent::PowerOn, Instant::now());
     let FsmState::PreparingToStart(after_power_on) = &power_on.next_state else {
         panic!("expected PreparingToStart after PowerOn");
     };
     assert_eq!(
-        after_power_on.len(),
-        2,
-        "two assemblies pending after PowerOn"
+        after_power_on,
+        &BTreeSet::from([AssemblyId::Bcm]),
+        "only BCM is pending after PowerOn"
     );
 
-    let headlamp_ready = step(
+    let bcm_ready = step(
         &power_on.next_state,
         &power_on.modified_ctx,
-        &FsmEvent::AssemblyZoneReady(AssemblyId::Headlamp),
+        &FsmEvent::AssemblyZoneReady(AssemblyId::Bcm),
         Instant::now(),
     );
-    let FsmState::PreparingToStart(after_headlamp) = &headlamp_ready.next_state else {
-        panic!("expected PreparingToStart after first AssemblyZoneReady");
-    };
-    assert_eq!(
-        after_headlamp,
-        &BTreeSet::from([AssemblyId::Wiper]),
-        "only Wiper remains after Headlamp clears"
-    );
+    assert_eq!(bcm_ready.next_state, FsmState::Idle);
 }
 
 #[test]
@@ -306,6 +295,5 @@ fn test_start_assemblies_action_carries_assembly_list() {
             }
         })
         .expect("StartAssemblies must be in actions after PowerOn");
-    assert!(list.contains(&AssemblyId::Headlamp));
-    assert!(list.contains(&AssemblyId::Wiper));
+    assert_eq!(list, vec![AssemblyId::Bcm]);
 }

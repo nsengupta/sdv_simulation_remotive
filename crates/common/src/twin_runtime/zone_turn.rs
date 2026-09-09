@@ -6,8 +6,8 @@ use crate::digital_twin::{ZoneMessage, ZoneReply};
 use crate::fsm::{AssemblyId, FsmEvent, FsmState};
 use crate::twin_runtime::zone_replies::ZoneReplies;
 use crate::vehicle_state::{
-    HeadlampMessage, HeadlampOutcome, HeadlampZoneReply, VehicleContext, WiperMessage,
-    WiperOutcome, WiperZoneReply,
+    BcmMessage, BcmOutcome, BcmZoneReply, HeadlampMessage, HeadlampOutcome, HeadlampZoneReply,
+    VehicleContext, WiperMessage, WiperOutcome, WiperZoneReply,
 };
 
 /// Tagged zone egress for one `zone_turn` call — replaces the per-zone
@@ -15,6 +15,7 @@ use crate::vehicle_state::{
 /// homogeneous as the number of assemblies grows.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ZoneOutcome {
+    Bcm(BcmOutcome),
     Headlamp(HeadlampOutcome),
     Wiper(WiperOutcome),
 }
@@ -44,6 +45,7 @@ pub(crate) fn zone_message_for_event(
 ) -> Option<(AssemblyId, ZoneMessage)> {
     match state {
         FsmState::PreparingToStart(_) | FsmState::PreparingToStop(_) => None,
+        FsmState::Off => None,
         _ => user_event_to_zone_tell(event),
     }
 }
@@ -54,6 +56,10 @@ pub(crate) fn zone_message_for_event(
 /// which carry their reply embedded in the barrier.
 fn user_event_to_zone_tell(event: &FsmEvent) -> Option<(AssemblyId, ZoneMessage)> {
     match event {
+        FsmEvent::HazardButtonChanged(on) => Some((
+            AssemblyId::Bcm,
+            ZoneMessage::Bcm(BcmMessage::HazardButtonChanged(*on)),
+        )),
         FsmEvent::UpdateAmbientLux(lux) => Some((
             AssemblyId::Headlamp,
             ZoneMessage::Headlamp(HeadlampMessage::AmbientLux(*lux)),
@@ -78,13 +84,22 @@ fn user_event_to_zone_tell(event: &FsmEvent) -> Option<(AssemblyId, ZoneMessage)
         }
         FsmEvent::RainsStopped => Some((AssemblyId::Wiper, ZoneMessage::Wiper(WiperMessage::Stop))),
         FsmEvent::UpdateRpm(_)
-        | FsmEvent::HazardButtonChanged(_)
         | FsmEvent::PowerOn
         | FsmEvent::PowerOff
         | FsmEvent::TimerTick
         | FsmEvent::Internal(_)
         | FsmEvent::AssemblyZoneReady(_) => None,
     }
+}
+
+fn merge_bcm_for_message(
+    ctx: &VehicleContext,
+    message: BcmMessage,
+    tell_back: Option<&BcmZoneReply>,
+) -> BcmZoneReply {
+    tell_back
+        .cloned()
+        .unwrap_or_else(|| ctx.bcm.on_receiving_message(message))
 }
 
 fn merge_headlamp_for_message(
@@ -125,8 +140,18 @@ pub fn zone_turn(
     let wiper_ingress = zone_replies
         .get(&AssemblyId::Wiper)
         .and_then(ZoneReply::as_wiper);
+    let bcm_ingress = zone_replies
+        .get(&AssemblyId::Bcm)
+        .and_then(ZoneReply::as_bcm);
 
     match event {
+        FsmEvent::HazardButtonChanged(on) => {
+            next.sccm.hazard_button_on = *on;
+            let zone_reply =
+                merge_bcm_for_message(ctx, BcmMessage::HazardButtonChanged(*on), bcm_ingress);
+            next.bcm = zone_reply.ctx;
+            outcomes.extend(zone_reply.outcomes.into_iter().map(ZoneOutcome::Bcm));
+        }
         FsmEvent::UpdateRpm(rpm) => {
             next.powertrain.apply_rpm(*rpm);
             next.powertrain.refresh_speed();
@@ -188,11 +213,14 @@ pub fn zone_turn(
             next.wiper = zone_reply.ctx;
             outcomes.extend(zone_reply.outcomes.into_iter().map(ZoneOutcome::Wiper));
         }
-        FsmEvent::PowerOn
-        | FsmEvent::PowerOff
-        | FsmEvent::HazardButtonChanged(_)
-        | FsmEvent::Internal(_) => {}
+        FsmEvent::PowerOn | FsmEvent::PowerOff | FsmEvent::Internal(_) => {}
         FsmEvent::AssemblyZoneReady(assembly_id) => match assembly_id {
+            AssemblyId::Bcm => {
+                if let Some(reply) = bcm_ingress {
+                    next.bcm = reply.ctx.clone();
+                    outcomes.extend(reply.outcomes.iter().cloned().map(ZoneOutcome::Bcm));
+                }
+            }
             AssemblyId::Headlamp => {
                 if let Some(reply) = headlamp_ingress {
                     next.headlamp = reply.ctx.clone();

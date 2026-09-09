@@ -70,17 +70,15 @@ async fn given_low_lux_and_on_ack_when_get_status_then_ledger_headlamp_matches_e
         handle,
     };
 
-    // startup barrier drains for BOTH assemblies.
+    // BCM-only startup drains two rows.
     // row 1 = PowerOn → PreparingToStart
-    // row 2 = AssemblyZoneReady(Headlamp) → PreparingToStart
-    // row 3 = AssemblyZoneReady(Wiper) → Idle
+    // row 2 = AssemblyZoneReady(Bcm) → Idle
     power_on_to_idle(&controller).await;
     let _power_on_record = rx.recv().await.expect("ledger row for power on");
-    let _ = rx.recv().await.expect("ledger row for headlamp zone ready");
     let _ = rx
         .recv()
         .await
-        .expect("ledger row for wiper zone ready → idle");
+        .expect("ledger row for BCM zone ready → idle");
 
     controller
         .submit_fsm_event(FsmEvent::UpdateAmbientLux(20))
@@ -152,17 +150,15 @@ async fn given_power_on_only_when_get_status_then_ledger_headlamp_matches_embed(
         handle,
     };
 
-    // startup barrier drains for BOTH assemblies.
+    // BCM-only startup drains two rows.
     // row 1 = PowerOn → PreparingToStart
-    // row 2 = AssemblyZoneReady(Headlamp) → PreparingToStart
-    // row 3 = AssemblyZoneReady(Wiper) → Idle
+    // row 2 = AssemblyZoneReady(Bcm) → Idle
     power_on_to_idle(&controller).await;
     let _power_on_record = rx.recv().await.expect("ledger row for power on");
-    let _ = rx.recv().await.expect("ledger row for headlamp zone ready");
-    let wiper_ready_record = rx
+    let bcm_ready_record = rx
         .recv()
         .await
-        .expect("ledger row for wiper zone ready → idle");
+        .expect("ledger row for BCM zone ready → idle");
     assert_eq!(_power_on_record.event, PublishedFsmEvent::PowerOn);
 
     let snapshot = actor_ref
@@ -171,10 +167,10 @@ async fn given_power_on_only_when_get_status_then_ledger_headlamp_matches_embed(
         .expect("GetStatus call")
         .expect("GetStatus reply");
 
-    // The latest ledger record (AssemblyZoneReady(Wiper) → Idle) carries the post-startup
+    // The latest ledger record (AssemblyZoneReady(Bcm) → Idle) carries the post-startup
     // headlamp context, which should match the persisted snapshot after reaching Idle.
     assert_published_headlamp_matches_runtime(
-        &wiper_ready_record.current_ctx.headlamp,
+        &bcm_ready_record.current_ctx.headlamp,
         &snapshot.context().headlamp,
     );
 }

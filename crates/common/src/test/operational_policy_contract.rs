@@ -114,7 +114,7 @@ fn ctx_driving_dangerous_after_failed_on() -> VehicleContext {
 }
 
 #[test]
-fn given_driving_in_dark_when_on_request_times_out_then_two_hop_quiescence_enters_danger() {
+fn given_driving_in_dark_when_on_request_times_out_then_phase_one_stays_driving() {
     let t0 = Instant::now();
     let mut ctx = ctx_driving_in_dark();
     ctx.headlamp.state = HeadlampState::OnRequested;
@@ -128,16 +128,8 @@ fn given_driving_in_dark_when_on_request_times_out_then_two_hop_quiescence_enter
         &ZoneReplies::simulate_locally(),
     );
 
-    assert_eq!(
-        result.hops.len(),
-        2,
-        "external zone hop then internal synthesis"
-    );
+    assert_eq!(result.hops.len(), 1);
     assert_eq!(result.hops[0].event, FsmEvent::TimerTick);
-    assert!(matches!(
-        result.hops[1].event,
-        FsmEvent::Internal(Operational::LightingUnsafe)
-    ));
     assert_eq!(
         result.hops[0].result.modified_ctx.headlamp.state,
         HeadlampState::Ready
@@ -150,15 +142,8 @@ fn given_driving_in_dark_when_on_request_times_out_then_two_hop_quiescence_enter
             .any(|a| matches!(a, DomainAction::LogWarning(_))),
         "zone should emit lighting timeout warning on hop 1"
     );
-    assert_eq!(
-        result.hops[1].result.modified_ctx, result.hops[0].result.modified_ctx,
-        "internal hop must not mutate L1"
-    );
-    assert_eq!(result.final_step().next_state, FsmState::DrivingDangerously);
-    assert!(
-        result.merged_actions().contains(&DomainAction::StartBuzzer),
-        "danger mode should alarm after quiescence"
-    );
+    assert_eq!(result.final_step().next_state, FsmState::Driving);
+    assert!(!result.merged_actions().contains(&DomainAction::StartBuzzer));
 }
 
 #[test]

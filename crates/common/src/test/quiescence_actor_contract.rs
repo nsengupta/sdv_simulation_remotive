@@ -6,9 +6,7 @@ use std::time::{Duration, Instant};
 
 use crate::VehicleController;
 use crate::fsm::{DomainAction, FsmEvent, FsmState, HeadlampState, Operational};
-use crate::observation_records::transition::{
-    PublishedDomainAction, PublishedFsmEvent, PublishedFsmState, PublishedOperational,
-};
+use crate::observation_records::transition::{PublishedFsmEvent, PublishedFsmState};
 use crate::test::ActorGuard;
 use crate::test::power_on_to_idle;
 use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
@@ -26,8 +24,7 @@ fn ctx_driving_in_dark() -> VehicleContext {
 }
 
 #[test]
-fn given_driving_on_requested_in_dark_when_commit_resolved_turn_after_ack_wait_then_two_hops_enter_danger()
- {
+fn given_driving_on_requested_in_dark_when_commit_resolved_turn_then_phase_one_stays_driving() {
     let t0 = Instant::now();
     let mut ctx = ctx_driving_in_dark();
     ctx.headlamp.state = HeadlampState::OnRequested;
@@ -43,21 +40,13 @@ fn given_driving_on_requested_in_dark_when_commit_resolved_turn_after_ack_wait_t
         },
     );
 
-    assert_eq!(quiescent.hops.len(), 2, "zone hop then internal synthesis");
+    assert_eq!(quiescent.hops.len(), 1);
     assert_eq!(quiescent.hops[0].event, FsmEvent::TimerTick);
-    assert!(matches!(
-        quiescent.hops[1].event,
-        FsmEvent::Internal(Operational::LightingUnsafe)
-    ));
-    assert_eq!(
-        quiescent.final_step().next_state,
-        FsmState::DrivingDangerously
-    );
+    assert_eq!(quiescent.final_step().next_state, FsmState::Driving);
     assert!(
-        quiescent
+        !quiescent
             .merged_actions()
-            .contains(&DomainAction::StartBuzzer),
-        "quiescence must merge buzzer from internal hop"
+            .contains(&DomainAction::StartBuzzer)
     );
 }
 
@@ -117,18 +106,8 @@ async fn given_actor_idle_when_power_on_then_single_ledger_row_and_idle_state() 
     assert_eq!(record_start.event, PublishedFsmEvent::PowerOn);
     assert_eq!(record_start.next_state, PublishedFsmState::PreparingToStart);
 
-    // TWO startup barriers drain:
-    // row 2 = AssemblyZoneReady(Headlamp) → PreparingToStart (Wiper still pending)
-    // row 3 = AssemblyZoneReady(Wiper) → Idle
-    let record_headlamp = rx.recv().await.expect("headlamp zone ready row");
-    assert_eq!(record_headlamp.record_seq, 2);
-    assert_eq!(
-        record_headlamp.next_state,
-        PublishedFsmState::PreparingToStart
-    );
-
-    let record_idle = rx.recv().await.expect("wiper zone ready → idle ledger row");
-    assert_eq!(record_idle.record_seq, 3);
+    let record_idle = rx.recv().await.expect("BCM zone ready → idle ledger row");
+    assert_eq!(record_idle.record_seq, 2);
     assert_eq!(record_idle.next_state, PublishedFsmState::Idle);
 
     let snapshot = controller
@@ -136,7 +115,7 @@ async fn given_actor_idle_when_power_on_then_single_ledger_row_and_idle_state() 
         .await
         .expect("snapshot");
     assert_eq!(*snapshot.current_state(), FsmState::Idle);
-    assert_eq!(snapshot.as_of_seq(), 3);
+    assert_eq!(snapshot.as_of_seq(), 2);
 }
 
 #[tokio::test]
@@ -159,17 +138,12 @@ async fn given_actor_driving_in_dark_when_ack_wait_elapses_then_two_ledger_rows_
         handle,
     };
 
-    // drain THREE boot rows:
+    // drain two BCM-only boot rows:
     // row 1 = PowerOn → PreparingToStart
-    // row 2 = AssemblyZoneReady(Headlamp) → PreparingToStart
-    // row 3 = AssemblyZoneReady(Wiper) → Idle
+    // row 2 = AssemblyZoneReady(Bcm) → Idle
     power_on_to_idle(&controller).await;
     let _ = rx.recv().await.expect("power on → preparing row");
-    let _ = rx
-        .recv()
-        .await
-        .expect("headlamp zone ready → preparing row");
-    let _ = rx.recv().await.expect("wiper zone ready → idle row");
+    let _ = rx.recv().await.expect("BCM zone ready → idle row");
 
     crate::test::submit_daylight_ambient(&controller).await;
     let _ = rx.recv().await.expect("bright lux row");
@@ -193,8 +167,6 @@ async fn given_actor_driving_in_dark_when_ack_wait_elapses_then_two_ledger_rows_
         .recv()
         .await
         .expect("spontaneous incomplete hop ledger row");
-    let hop2 = rx.recv().await.expect("internal hop ledger row");
-
     assert!(
         matches!(
             hop1.event,
@@ -204,33 +176,17 @@ async fn given_actor_driving_in_dark_when_ack_wait_elapses_then_two_ledger_rows_
         hop1.event
     );
     assert_eq!(hop1.next_state, PublishedFsmState::Driving);
-    assert!(matches!(
-        hop2.event,
-        PublishedFsmEvent::Internal(PublishedOperational::LightingUnsafe)
-    ));
-    assert_eq!(hop2.next_state, PublishedFsmState::DrivingDangerously);
     assert!(
-        hop2.actions
-            .iter()
-            .any(|a| matches!(a, PublishedDomainAction::StartBuzzer)),
-        "internal hop row must carry StartBuzzer, got {:?}",
-        hop2.actions
+        rx.try_recv().is_err(),
+        "LightingUnsafe is disabled in Phase I"
     );
-    assert_eq!(hop2.record_seq, hop1.record_seq + 1);
-
-    crate::test::wait_fsm_state(
-        &controller,
-        FsmState::DrivingDangerously,
-        Duration::from_secs(1),
-    )
-    .await;
 
     let snapshot = controller
         .get_snapshot(Some(ractor::concurrency::Duration::from_millis(250)))
         .await
         .expect("snapshot");
-    assert_eq!(*snapshot.current_state(), FsmState::DrivingDangerously);
-    assert_eq!(snapshot.as_of_seq(), hop2.record_seq);
+    assert_eq!(*snapshot.current_state(), FsmState::Driving);
+    assert_eq!(snapshot.as_of_seq(), hop1.record_seq);
     assert_eq!(
         snapshot.context().headlamp.state,
         HeadlampState::Ready,

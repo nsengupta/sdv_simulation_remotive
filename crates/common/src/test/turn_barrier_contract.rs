@@ -134,43 +134,23 @@ async fn spawn_silent(
     (controller, rx, guard)
 }
 
-/// Turn ID allocated for the headlamp startup barrier (first in ALL_ASSEMBLIES).
-/// PowerOn → turn 1 (passthrough), headlamp startup → turn 2.
-const STARTUP_BARRIER_TURN: u64 = 2;
-
-/// Turn ID allocated for the wiper startup barrier (second in ALL_ASSEMBLIES).
-/// : wiper startup → turn 3.
-const WIPER_STARTUP_BARRIER_TURN: u64 = 3;
-
 /// First turn ID available to user-driven events after `boot_silent`.
-/// : PowerOn=1, headlamp startup=2, wiper startup=3, first user event=4.
-const FIRST_USER_TURN: u64 = 4;
+/// PowerOn=1, BCM startup=2, first user event=3.
+const FIRST_USER_TURN: u64 = 3;
 
-/// Boot sequence for a silent-headlamp actor (wiper is non-silent).
-///
-/// Sends `PowerOn` (turn 1 passthrough), manually injects the headlamp `BecomeOn` `ZoneReady`
-/// reply (turn 2 — headlamp is silent), then waits for the wiper to auto-reply (turn 3 —
-/// wiper is non-silent by default), and waits for the FSM to reach `Idle`.
-/// Drains the three resulting ledger rows:
-/// PowerOn + AssemblyZoneReady(Headlamp) + AssemblyZoneReady(Wiper).
+/// Boot sequence with BCM as the sole lifecycle participant.
 async fn boot_silent(
     controller: &VehicleController,
     rx: &mut mpsc::Receiver<PublishedTransitionRecord>,
 ) {
     controller.send_power_on().await.expect("power on");
-    // Give the actor a moment to process PowerOn and create the startup barriers.
-    tokio::task::yield_now().await;
-    inject_zone_ready(controller, STARTUP_BARRIER_TURN, HeadlampState::Ready);
-    // Wiper (turn 3) is non-silent and auto-replies.
-    let _ = WIPER_STARTUP_BARRIER_TURN; // documented for clarity
     crate::test::wait_fsm_state(
         controller,
         FsmState::Idle,
         std::time::Duration::from_millis(500),
     )
     .await;
-    // drain THREE ledger rows: PowerOn + AssemblyZoneReady(Headlamp) + AssemblyZoneReady(Wiper).
-    drain_n(rx, 3, std::time::Duration::from_secs(3)).await;
+    drain_n(rx, 2, std::time::Duration::from_secs(3)).await;
 }
 
 // ── Test 1 ──────────────────────────────────────────────────────────────────

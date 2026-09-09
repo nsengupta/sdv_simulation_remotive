@@ -124,7 +124,7 @@ fn given_headlamp_ingress_embed_when_commit_resolved_turn_then_uses_tell_back_no
 }
 
 #[test]
-fn given_simulated_replies_when_twin_turn_after_ack_wait_then_matches_quiescence_two_hop_journey() {
+fn given_simulated_replies_when_twin_turn_after_ack_wait_then_phase_one_stays_single_hop() {
     let t0 = Instant::now();
     let mut ctx = driving_ctx();
     ctx.headlamp.state = HeadlampState::OnRequested;
@@ -146,13 +146,13 @@ fn given_simulated_replies_when_twin_turn_after_ack_wait_then_matches_quiescence
         },
     );
 
-    assert_eq!(quiescent.hops.len(), 2);
+    assert_eq!(quiescent.hops.len(), 1);
     assert_eq!(
         quiescent.hops[0].result.modified_ctx.headlamp.state,
         single.modified_ctx.headlamp.state
     );
     assert_eq!(
         quiescent.final_step().next_state,
-        crate::fsm::FsmState::DrivingDangerously
+        crate::fsm::FsmState::Driving
     );
 }

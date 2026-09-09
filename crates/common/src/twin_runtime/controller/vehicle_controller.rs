@@ -39,6 +39,9 @@ pub struct VehicleControllerRuntimeOptions {
     /// Contract tests: wiper twinlet ignores tells (manual `ZoneReady` injection needed).
     #[doc(hidden)]
     pub test_silent_wiper: bool,
+    /// Contract tests: BCM twinlet ignores tells (manual `ZoneReady` injection needed).
+    #[doc(hidden)]
+    pub test_silent_bcm: bool,
 }
 
 impl Default for VehicleControllerRuntimeOptions {
@@ -50,6 +53,7 @@ impl Default for VehicleControllerRuntimeOptions {
             transition_tx: None,
             test_silent_headlamp: false,
             test_silent_wiper: false,
+            test_silent_bcm: false,
         }
     }
 }

@@ -16,13 +16,13 @@ use time::{OffsetDateTime, UtcOffset};
 use uuid::Uuid;
 
 use common::facade::{
-    DiagnosticKind, DiagnosticLevel, DiagnosticRecord, PublishedDomainAction,
-    PublishedFrontHeadlampIncompleteCause, PublishedFrontHeadlampSwitchDirection,
-    PublishedFsmEvent, PublishedFsmState, PublishedHeadlampContext, PublishedHeadlampState,
-    PublishedHealthContext, PublishedOperational, PublishedPowertrainContext,
-    PublishedTransitionRecord, PublishedVehicleContext, PublishedVisibilityContext,
-    PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
-    UnixTimestamp,
+    DiagnosticKind, DiagnosticLevel, DiagnosticRecord, PublishedBcmContext, PublishedBcmState,
+    PublishedDomainAction, PublishedFrontHeadlampIncompleteCause,
+    PublishedFrontHeadlampSwitchDirection, PublishedFsmEvent, PublishedFsmState,
+    PublishedHeadlampContext, PublishedHeadlampState, PublishedHealthContext, PublishedOperational,
+    PublishedPowertrainContext, PublishedSccmContext, PublishedTransitionRecord,
+    PublishedVehicleContext, PublishedVisibilityContext, PublishedWeatherContext,
+    PublishedWheelRpm, PublishedWiperContext, PublishedWiperState, UnixTimestamp,
 };
 use common::fsm::FrontHeadlampIncompleteCause;
 
@@ -306,6 +306,7 @@ pub enum DomainActionV1 {
     RequestFrontHeadlampOff,
     RequestWiperStart,
     RequestWiperStop,
+    SetTurnLights { left_on: bool, right_on: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -409,6 +410,25 @@ pub struct WiperContextV1 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SccmContextV1 {
+    pub hazard_button_on: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BcmStateV1 {
+    Off,
+    Ready,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BcmContextV1 {
+    pub state: BcmStateV1,
+    pub left_turn_request_on: bool,
+    pub right_turn_request_on: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HeadlampStateV1 {
     Off,
@@ -426,6 +446,8 @@ pub struct HeadlampContextV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VehicleContextV1 {
+    pub sccm: SccmContextV1,
+    pub bcm: BcmContextV1,
     pub powertrain: PowertrainContextV1,
     pub health: HealthContextV1,
     pub visibility: VisibilityContextV1,
@@ -623,11 +645,25 @@ fn project_domain_action(action: &PublishedDomainAction) -> DomainActionV1 {
         PublishedDomainAction::RequestFrontHeadlampOff => DomainActionV1::RequestFrontHeadlampOff,
         PublishedDomainAction::RequestWiperStart => DomainActionV1::RequestWiperStart,
         PublishedDomainAction::RequestWiperStop => DomainActionV1::RequestWiperStop,
+        PublishedDomainAction::SetTurnLights { left_on, right_on } => {
+            DomainActionV1::SetTurnLights {
+                left_on: *left_on,
+                right_on: *right_on,
+            }
+        }
     }
 }
 
 fn project_vehicle_context(ctx: &PublishedVehicleContext) -> VehicleContextV1 {
     VehicleContextV1 {
+        sccm: SccmContextV1 {
+            hazard_button_on: ctx.sccm.hazard_button_on,
+        },
+        bcm: BcmContextV1 {
+            state: project_bcm_state(ctx.bcm.state),
+            left_turn_request_on: ctx.bcm.left_turn_request_on,
+            right_turn_request_on: ctx.bcm.right_turn_request_on,
+        },
         powertrain: project_powertrain_context(&ctx.powertrain),
         health: project_health_context(&ctx.health),
         visibility: project_visibility_context(&ctx.visibility),
@@ -638,6 +674,13 @@ fn project_vehicle_context(ctx: &PublishedVehicleContext) -> VehicleContextV1 {
         wiper: WiperContextV1 {
             state: project_wiper_state(ctx.wiper.state),
         },
+    }
+}
+
+fn project_bcm_state(state: PublishedBcmState) -> BcmStateV1 {
+    match state {
+        PublishedBcmState::Off => BcmStateV1::Off,
+        PublishedBcmState::Ready => BcmStateV1::Ready,
     }
 }
 
@@ -862,11 +905,25 @@ fn live_domain_action(action: &DomainActionV1) -> PublishedDomainAction {
         DomainActionV1::RequestFrontHeadlampOff => PublishedDomainAction::RequestFrontHeadlampOff,
         DomainActionV1::RequestWiperStart => PublishedDomainAction::RequestWiperStart,
         DomainActionV1::RequestWiperStop => PublishedDomainAction::RequestWiperStop,
+        DomainActionV1::SetTurnLights { left_on, right_on } => {
+            PublishedDomainAction::SetTurnLights {
+                left_on: *left_on,
+                right_on: *right_on,
+            }
+        }
     }
 }
 
 fn live_vehicle_context(ctx: &VehicleContextV1) -> PublishedVehicleContext {
     PublishedVehicleContext {
+        sccm: PublishedSccmContext {
+            hazard_button_on: ctx.sccm.hazard_button_on,
+        },
+        bcm: PublishedBcmContext {
+            state: live_bcm_state(ctx.bcm.state),
+            left_turn_request_on: ctx.bcm.left_turn_request_on,
+            right_turn_request_on: ctx.bcm.right_turn_request_on,
+        },
         powertrain: PublishedPowertrainContext {
             wheel_rpm: PublishedWheelRpm {
                 front_left: ctx.powertrain.wheel_rpm.front_left,
@@ -894,6 +951,13 @@ fn live_vehicle_context(ctx: &VehicleContextV1) -> PublishedVehicleContext {
         wiper: PublishedWiperContext {
             state: live_wiper_state(ctx.wiper.state),
         },
+    }
+}
+
+fn live_bcm_state(state: BcmStateV1) -> PublishedBcmState {
+    match state {
+        BcmStateV1::Off => PublishedBcmState::Off,
+        BcmStateV1::Ready => PublishedBcmState::Ready,
     }
 }
 

@@ -74,12 +74,10 @@ fn driving_ctx() -> crate::vehicle_state::VehicleContext {
 #[tokio::test]
 async fn given_silent_headlamp_when_headlamp_demux_event_then_ledger_records_unresponsive_warning()
 {
-    use crate::digital_twin::{TwinMessage, ZoneReply};
-    use crate::fsm::{AssemblyId, FsmEvent, FsmState, HeadlampState};
+    use crate::fsm::{FsmEvent, FsmState};
     use crate::test::ActorGuard;
     use crate::twin_runtime::constants::{ZONE_TELL_BACK_ATTEMPT_COUNT, ZONE_TELL_BACK_WAIT};
     use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
-    use crate::vehicle_state::{HeadlampContext, HeadlampZoneReply};
     use crate::{PublishedDomainAction, PublishedFsmEvent, VehicleController};
     use tokio::sync::mpsc;
 
@@ -101,37 +99,17 @@ async fn given_silent_headlamp_when_headlamp_demux_event_then_ledger_records_unr
         handle,
     };
 
-    // headlamp is silent so the startup barrier never completes automatically.
-    // Manually inject the ZoneReady reply (turn 2) to allow the FSM to reach Idle.
+    // Headlamp is not a Phase I lifecycle participant; BCM starts automatically.
     controller.send_power_on().await.expect("power on");
-    tokio::task::yield_now().await; // give the actor time to create the startup barrier
-    controller
-        .get_actor_ref()
-        .send_message(TwinMessage::ZoneReady {
-            zone_id: AssemblyId::Headlamp,
-            turn_id: 2, // startup barrier is always turn 2 (PowerOn=1, StartAssemblies barrier=2)
-            tell_attempt: 0,
-            reply: ZoneReply::Headlamp(HeadlampZoneReply {
-                ctx: HeadlampContext {
-                    state: HeadlampState::Ready,
-                    ack_pending_since: None,
-                },
-                outcomes: vec![],
-            }),
-        })
-        .expect("inject startup zone ready");
     crate::test::wait_fsm_state(
         &controller,
         FsmState::Idle,
         std::time::Duration::from_millis(500),
     )
     .await;
-    // drain THREE startup ledger rows:
-    // PowerOn + AssemblyZoneReady(Headlamp) + AssemblyZoneReady(Wiper).
-    // Wiper is non-silent (default) so it auto-replies to its BecomeOn barrier (turn 3).
+    // Drain PowerOn + AssemblyZoneReady(Bcm).
     let _ = rx.recv().await.expect("power on row");
-    let _ = rx.recv().await.expect("headlamp assembly zone ready row");
-    let _ = rx.recv().await.expect("wiper assembly zone ready row");
+    let _ = rx.recv().await.expect("BCM assembly zone ready row");
 
     // Now the headlamp is still silent for operational tell-backs.
     controller

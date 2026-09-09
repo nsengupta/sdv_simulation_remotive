@@ -19,10 +19,11 @@ pub mod transition;
 
 pub use diagnostic::{DiagnosticKind, DiagnosticLevel, DiagnosticRecord, elapsed_since_session};
 pub use transition::{
-    PublishedDomainAction, PublishedFrontHeadlampIncompleteCause,
-    PublishedFrontHeadlampSwitchDirection, PublishedFsmEvent, PublishedFsmState,
-    PublishedHeadlampContext, PublishedHeadlampState, PublishedHealthContext,
-    PublishedPowertrainContext, PublishedTransitionRecord, PublishedVehicleContext,
-    PublishedVisibilityContext, PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext,
-    PublishedWiperState, SessionClock,
+    PublishedBcmContext, PublishedBcmState, PublishedDomainAction,
+    PublishedFrontHeadlampIncompleteCause, PublishedFrontHeadlampSwitchDirection,
+    PublishedFsmEvent, PublishedFsmState, PublishedHeadlampContext, PublishedHeadlampState,
+    PublishedHealthContext, PublishedPowertrainContext, PublishedSccmContext,
+    PublishedTransitionRecord, PublishedVehicleContext, PublishedVisibilityContext,
+    PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
+    SessionClock,
 };
