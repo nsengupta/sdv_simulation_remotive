@@ -40,8 +40,10 @@ impl FrontHeadlampPolicy {
                 sequence: correlation_id.sequence_no as u32,
                 on_command: false,
             },
- // Wiper commands carry no CorrelationId and are handled by the wiper device, not here.
-            ActuationCommand::StartWiper | ActuationCommand::StopWiper => return,
+            // Other actuator commands are not tracked by the front-headlamp policy.
+            ActuationCommand::StartWiper
+            | ActuationCommand::StopWiper
+            | ActuationCommand::SetTurnLights { .. } => return,
         };
         self.pending = Some(pending);
     }

@@ -48,6 +48,16 @@ const ACTUATION_COMMAND_CHANNEL_CAPACITY: usize = 64;
 /// twin), so lines are dropped once this fills.
 const INGRESS_LOG_CHANNEL_CAPACITY: usize = 512;
 
+/// Selects how controller actuation commands leave the gateway.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ActuationEgressMode {
+    /// Phase I behavior: consume commands without opening actuator CAN publisher sockets.
+    #[default]
+    Null,
+    /// Backward-compatible front-headlamp and wiper CAN publishers.
+    LegacyCan,
+}
+
 /// Messages forwarded from the dedicated CAN reader thread into the async dispatch loop.
 enum CanIngressEnvelope {
     TwinIngress(TwinIngressEvent),
@@ -80,6 +90,7 @@ pub struct TwinRuntimeBuilder {
     ingress_console_log: bool,
     /// Created internally by [`install_controller`]; consumed by [`spawn_runtime`].
     actuation_cmd_rx: Option<mpsc::Receiver<ActuationCommand>>,
+    actuation_egress_mode: ActuationEgressMode,
 }
 
 impl TwinRuntimeBuilder {
@@ -95,6 +106,7 @@ impl TwinRuntimeBuilder {
             auto_power_on: true,
             ingress_console_log: false,
             actuation_cmd_rx: None,
+            actuation_egress_mode: ActuationEgressMode::default(),
         }
     }
 
@@ -149,6 +161,17 @@ impl TwinRuntimeBuilder {
     /// Whether ingress ACK lines are printed to stdout.
     pub fn ingress_console_log(&self) -> bool {
         self.ingress_console_log
+    }
+
+    /// Select actuation egress. Legacy CAN publishing is opt-in.
+    pub fn with_actuation_egress_mode(mut self, mode: ActuationEgressMode) -> Self {
+        self.actuation_egress_mode = mode;
+        self
+    }
+
+    /// Return the configured actuation egress mode.
+    pub fn actuation_egress_mode(&self) -> ActuationEgressMode {
+        self.actuation_egress_mode
     }
 
     /// Attach a stdout diagnostic observer for the given receiver.
@@ -218,6 +241,7 @@ impl TwinRuntimeBuilder {
         let trace_actuation_ingress = self.trace_actuation_ingress;
         let auto_power_on = self.auto_power_on();
         let ingress_console_log = self.ingress_console_log;
+        let actuation_egress_mode = self.actuation_egress_mode;
         let actuation_cmd_rx = self.actuation_cmd_rx.take().ok_or_else(|| {
             anyhow::anyhow!("install_controller must be called before spawn_runtime")
         })?;
@@ -235,12 +259,16 @@ impl TwinRuntimeBuilder {
             None
         };
 
-        // Actuation command publishers (fan-out to headlamp + wiper)
-        spawn_actuation_command_publishers(
-            actuation_cmd_rx,
-            can_interface.clone(),
-            headlamp_policy.clone(),
-        );
+        match actuation_egress_mode {
+            ActuationEgressMode::Null => {
+                tokio::spawn(drain_actuation_commands(actuation_cmd_rx));
+            }
+            ActuationEgressMode::LegacyCan => spawn_actuation_command_publishers(
+                actuation_cmd_rx,
+                can_interface.clone(),
+                headlamp_policy.clone(),
+            ),
+        }
 
         // CAN reader thread (blocking I/O)
         let (can_tx, can_rx) = mpsc::unbounded_channel();
@@ -253,10 +281,13 @@ impl TwinRuntimeBuilder {
 
         if ingress_console_log {
             println!("⚡ Gateway on {can_interface} — CAN → TwinIngressEvent → VehicleController");
-            println!(
-                "[gateway] front-headlamp + wiper CMD egress on CAN; \
-                 run `cargo run -p front_headlamp_actuator` and `cargo run -p wiper_actuator`"
-            );
+            match actuation_egress_mode {
+                ActuationEgressMode::Null => println!("[gateway] actuation egress: null drain"),
+                ActuationEgressMode::LegacyCan => println!(
+                    "[gateway] front-headlamp + wiper CMD egress on CAN; \
+                     run `cargo run -p front_headlamp_actuator` and `cargo run -p wiper_actuator`"
+                ),
+            }
         }
 
         if auto_power_on {
@@ -303,6 +334,15 @@ impl Default for TwinRuntimeBuilder {
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+/// Consume commands until every sender closes, returning a shutdown diagnostic count.
+async fn drain_actuation_commands(mut actuation_cmd_rx: mpsc::Receiver<ActuationCommand>) -> usize {
+    let mut drained = 0;
+    while actuation_cmd_rx.recv().await.is_some() {
+        drained += 1;
+    }
+    drained
+}
 
 /// Dedicated OS thread for blocking `read_frame` loop.
 fn spawn_can_reader_thread(
@@ -391,7 +431,9 @@ fn spawn_actuation_command_publishers(
         while let Some(cmd) = actuation_cmd_rx.recv().await {
             let tx = match &cmd {
                 ActuationCommand::StartWiper | ActuationCommand::StopWiper => &wiper_tx,
-                _ => &headlamp_tx,
+                ActuationCommand::SwitchFrontHeadlampOn { .. }
+                | ActuationCommand::SwitchFrontHeadlampOff { .. } => &headlamp_tx,
+                ActuationCommand::SetTurnLights { .. } => continue,
             };
             if tx.send(cmd).await.is_err() {
                 break;
@@ -533,12 +575,51 @@ async fn run_can_ingress_dispatch_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use common::facade::CorrelationId;
 
     #[tokio::test]
     async fn builder_defaults_do_not_panic() {
         let builder = TwinRuntimeBuilder::new();
         assert!(builder.car_identity.is_none());
         assert_eq!(builder.can_interface, DEFAULT_CAN_INTERFACE);
+    }
+
+    #[test]
+    fn builder_defaults_to_null_actuation_egress() {
+        let builder = TwinRuntimeBuilder::new();
+        assert_eq!(builder.actuation_egress_mode(), ActuationEgressMode::Null);
+    }
+
+    #[test]
+    fn builder_can_explicitly_select_legacy_can_actuation_egress() {
+        let builder =
+            TwinRuntimeBuilder::new().with_actuation_egress_mode(ActuationEgressMode::LegacyCan);
+        assert_eq!(
+            builder.actuation_egress_mode(),
+            ActuationEgressMode::LegacyCan
+        );
+    }
+
+    #[tokio::test]
+    async fn null_actuation_egress_drains_every_command_until_channel_closes() {
+        let (tx, rx) = mpsc::channel(4);
+        tx.send(ActuationCommand::StartWiper)
+            .await
+            .expect("send wiper command");
+        tx.send(ActuationCommand::SetTurnLights {
+            correlation_id: CorrelationId {
+                source_id: "gateway-null-test".into(),
+                session_id: 9,
+                sequence_no: 1,
+            },
+            left_on: true,
+            right_on: true,
+        })
+        .await
+        .expect("send turn-light command");
+        drop(tx);
+
+        assert_eq!(drain_actuation_commands(rx).await, 2);
     }
 
     #[tokio::test]

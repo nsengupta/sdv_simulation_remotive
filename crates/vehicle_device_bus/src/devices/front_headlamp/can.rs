@@ -42,8 +42,10 @@ pub fn actuation_command_wire_meta(cmd: &ActuationCommand) -> (u16, u32) {
     let cid = match cmd {
         ActuationCommand::SwitchFrontHeadlampOn { correlation_id }
         | ActuationCommand::SwitchFrontHeadlampOff { correlation_id } => correlation_id,
-        ActuationCommand::StartWiper | ActuationCommand::StopWiper => {
-            panic!("wiper commands carry no CorrelationId; do not pass them to front_headlamp::can");
+        ActuationCommand::StartWiper
+        | ActuationCommand::StopWiper
+        | ActuationCommand::SetTurnLights { .. } => {
+            panic!("non-headlamp command passed to front_headlamp::can");
         }
     };
     (cid.session_id as u16, cid.sequence_no as u32)
@@ -53,10 +55,12 @@ pub fn encode_command_frame(cmd: &ActuationCommand) -> Result<CanFrame, socketca
     let kind = match cmd {
         ActuationCommand::SwitchFrontHeadlampOn { .. } => KIND_CMD_ON,
         ActuationCommand::SwitchFrontHeadlampOff { .. } => KIND_CMD_OFF,
-        ActuationCommand::StartWiper | ActuationCommand::StopWiper => {
+        ActuationCommand::StartWiper
+        | ActuationCommand::StopWiper
+        | ActuationCommand::SetTurnLights { .. } => {
             return Err(socketcan::Error::from(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "wiper commands are not encoded by the front-headlamp CAN device",
+                "non-headlamp command passed to front-headlamp CAN encoder",
             )));
         }
     };
@@ -67,10 +71,12 @@ pub fn encode_ack_frame(cmd: &ActuationCommand) -> Result<CanFrame, socketcan::E
     let kind = match cmd {
         ActuationCommand::SwitchFrontHeadlampOn { .. } => KIND_ACK_ON,
         ActuationCommand::SwitchFrontHeadlampOff { .. } => KIND_ACK_OFF,
-        ActuationCommand::StartWiper | ActuationCommand::StopWiper => {
+        ActuationCommand::StartWiper
+        | ActuationCommand::StopWiper
+        | ActuationCommand::SetTurnLights { .. } => {
             return Err(socketcan::Error::from(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "wiper commands are not encoded by the front-headlamp CAN device",
+                "non-headlamp command passed to front-headlamp CAN encoder",
             )));
         }
     };
@@ -81,10 +87,12 @@ pub fn encode_nack_frame(cmd: &ActuationCommand) -> Result<CanFrame, socketcan::
     let kind = match cmd {
         ActuationCommand::SwitchFrontHeadlampOn { .. } => KIND_NACK_ON,
         ActuationCommand::SwitchFrontHeadlampOff { .. } => KIND_NACK_OFF,
-        ActuationCommand::StartWiper | ActuationCommand::StopWiper => {
+        ActuationCommand::StartWiper
+        | ActuationCommand::StopWiper
+        | ActuationCommand::SetTurnLights { .. } => {
             return Err(socketcan::Error::from(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "wiper commands are not encoded by the front-headlamp CAN device",
+                "non-headlamp command passed to front-headlamp CAN encoder",
             )));
         }
     };

@@ -42,6 +42,12 @@ pub enum ActuationCommand {
     StartWiper,
     /// Tell the wiper actuator to stop wiping.
     StopWiper,
+    /// Atomically set both turn-light requests.
+    SetTurnLights {
+        correlation_id: CorrelationId,
+        left_on: bool,
+        right_on: bool,
+    },
 }
 
 /// Inbound actuation feedback on the controller actuation port (ACK/NACK, correlated).

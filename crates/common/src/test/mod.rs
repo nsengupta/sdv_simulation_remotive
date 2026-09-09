@@ -56,6 +56,9 @@ mod hazard_signal_contract;
 mod hazard_fsm_contract;
 
 #[cfg(test)]
+mod hazard_actuation_contract;
+
+#[cfg(test)]
 mod hazard_observation_contract;
 
 #[cfg(test)]
@@ -270,8 +273,10 @@ pub async fn inject_matching_ack(controller: &VehicleController, command: &Actua
         ActuationCommand::SwitchFrontHeadlampOff { .. } => {
             TwinIngressEvent::FrontHeadlampCommandConfirmed { on_command: false }
         }
-        ActuationCommand::StartWiper | ActuationCommand::StopWiper => {
-            panic!("wiper commands have no ACK protocol; use wiper-specific test helpers")
+        ActuationCommand::StartWiper
+        | ActuationCommand::StopWiper
+        | ActuationCommand::SetTurnLights { .. } => {
+            panic!("command has no ACK protocol; use actuator-specific test helpers")
         }
     };
     controller
@@ -352,8 +357,10 @@ pub async fn inject_matching_nack(controller: &VehicleController, command: &Actu
         ActuationCommand::SwitchFrontHeadlampOff { .. } => {
             TwinIngressEvent::FrontHeadlampCommandRejected { on_command: false }
         }
-        ActuationCommand::StartWiper | ActuationCommand::StopWiper => {
-            panic!("wiper commands have no ACK protocol; use wiper-specific test helpers")
+        ActuationCommand::StartWiper
+        | ActuationCommand::StopWiper
+        | ActuationCommand::SetTurnLights { .. } => {
+            panic!("command has no ACK protocol; use actuator-specific test helpers")
         }
     };
     controller
