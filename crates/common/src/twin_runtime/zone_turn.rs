@@ -78,6 +78,7 @@ fn user_event_to_zone_tell(event: &FsmEvent) -> Option<(AssemblyId, ZoneMessage)
         }
         FsmEvent::RainsStopped => Some((AssemblyId::Wiper, ZoneMessage::Wiper(WiperMessage::Stop))),
         FsmEvent::UpdateRpm(_)
+        | FsmEvent::HazardButtonChanged(_)
         | FsmEvent::PowerOn
         | FsmEvent::PowerOff
         | FsmEvent::TimerTick
@@ -187,7 +188,10 @@ pub fn zone_turn(
             next.wiper = zone_reply.ctx;
             outcomes.extend(zone_reply.outcomes.into_iter().map(ZoneOutcome::Wiper));
         }
-        FsmEvent::PowerOn | FsmEvent::PowerOff | FsmEvent::Internal(_) => {}
+        FsmEvent::PowerOn
+        | FsmEvent::PowerOff
+        | FsmEvent::HazardButtonChanged(_)
+        | FsmEvent::Internal(_) => {}
         FsmEvent::AssemblyZoneReady(assembly_id) => match assembly_id {
             AssemblyId::Headlamp => {
                 if let Some(reply) = headlamp_ingress {

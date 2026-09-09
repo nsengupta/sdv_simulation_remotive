@@ -4,6 +4,7 @@
 
 use std::time::{Duration, Instant};
 
+use crate::VehicleController;
 use crate::fsm::{DomainAction, FsmEvent, FsmState, HeadlampState, Operational};
 use crate::observation_records::transition::{
     PublishedDomainAction, PublishedFsmEvent, PublishedFsmState, PublishedOperational,
@@ -14,7 +15,6 @@ use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntim
 use crate::twin_runtime::{ResolvedTurn, ZoneReplies, commit_resolved_turn};
 use crate::vehicle_physics::{FRONT_HEADLAMP_ON_ACK_WAIT, RPM_DRIVING_THRESHOLD};
 use crate::vehicle_state::VehicleContext;
-use crate::{TwinIngressEvent, VehicleController, VssSignal};
 use tokio::sync::mpsc;
 
 fn ctx_driving_in_dark() -> VehicleContext {
@@ -181,7 +181,7 @@ async fn given_actor_driving_in_dark_when_ack_wait_elapses_then_two_ledger_rows_
     let _ = rx.recv().await.expect("rpm row");
 
     controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::AmbientLux(20)))
+        .submit_fsm_event(FsmEvent::UpdateAmbientLux(20))
         .await
         .expect("low lux");
     let lux_row = rx.recv().await.expect("lux row");

@@ -44,6 +44,9 @@ mod lighting_step_contract;
 mod lifecycle_signal_contract;
 
 #[cfg(test)]
+mod hazard_signal_contract;
+
+#[cfg(test)]
 mod quiescence_actor_contract;
 
 #[cfg(test)]

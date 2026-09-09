@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use crate::VehicleController;
 use crate::fsm::{FsmEvent, FsmState, HeadlampState};
 use crate::observation_records::transition::{
     PublishedDomainAction, PublishedFsmEvent, PublishedFsmState, PublishedOperational,
@@ -12,7 +13,6 @@ use crate::test::{
 };
 use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
 use crate::vehicle_physics::{FRONT_HEADLAMP_ON_ACK_WAIT, RPM_DRIVING_THRESHOLD};
-use crate::{TwinIngressEvent, VehicleController, VssSignal};
 use tokio::sync::mpsc;
 
 #[tokio::test]
@@ -54,7 +54,7 @@ async fn given_actor_driving_in_dark_when_ack_wait_elapses_without_timer_tick_th
     let _ = rx.recv().await.expect("rpm row");
 
     controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::AmbientLux(20)))
+        .submit_fsm_event(FsmEvent::UpdateAmbientLux(20))
         .await
         .expect("low lux");
     let lux_row = rx.recv().await.expect("lux row");
@@ -137,7 +137,7 @@ async fn given_actor_on_requested_when_ack_before_deadline_then_no_spontaneous_i
     let _ = rx.recv().await.expect("wiper zone ready → idle row");
 
     controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::AmbientLux(20)))
+        .submit_fsm_event(FsmEvent::UpdateAmbientLux(20))
         .await
         .expect("low lux");
     let _ = rx.recv().await.expect("lux row");

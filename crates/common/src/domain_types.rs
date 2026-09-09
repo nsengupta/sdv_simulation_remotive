@@ -1,4 +1,4 @@
-use crate::signals::{LifecycleCommand, VssSignal};
+use crate::signals::{ControlSignal, LifecycleCommand, VssSignal};
 pub use crate::vehicle_physics::{
     RPM_EXTREME_OPERATION_THRESHOLD, RPM_IDLE, RPM_REDLINE_THRESHOLD,
     RPM_STRESS_DURATION_THRESHOLD_SECS, SPEED_EXTREME_OPERATION_THRESHOLD_KPH,
@@ -43,6 +43,8 @@ pub enum TwinIngressEvent {
     Lifecycle(LifecycleCommand),
     /// An interpreted VSS telemetry value received from an ingress carrier.
     Telemetry(VssSignal),
+    /// A validated driver control received from an ingress carrier.
+    Control(ControlSignal),
     /// A system-generated heartbeat or check.
     TimerTick,
     /// Emergency stop or system reset.

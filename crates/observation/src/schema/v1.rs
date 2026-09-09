@@ -249,6 +249,9 @@ pub enum FsmEventV1 {
     UpdateRpm {
         rpm: u16,
     },
+    HazardButtonChanged {
+        pressed: bool,
+    },
     UpdateAmbientLux {
         lux: u16,
     },
@@ -571,6 +574,9 @@ fn project_fsm_event(event: &PublishedFsmEvent) -> FsmEventV1 {
         PublishedFsmEvent::PowerOn => FsmEventV1::PowerOn,
         PublishedFsmEvent::PowerOff => FsmEventV1::PowerOff,
         PublishedFsmEvent::UpdateRpm(rpm) => FsmEventV1::UpdateRpm { rpm: *rpm },
+        PublishedFsmEvent::HazardButtonChanged(pressed) => {
+            FsmEventV1::HazardButtonChanged { pressed: *pressed }
+        }
         PublishedFsmEvent::UpdateAmbientLux(lux) => FsmEventV1::UpdateAmbientLux { lux: *lux },
         PublishedFsmEvent::FrontHeadlampOnAck => FsmEventV1::FrontHeadlampOnAck,
         PublishedFsmEvent::FrontHeadlampOffAck => FsmEventV1::FrontHeadlampOffAck,
@@ -807,6 +813,9 @@ fn live_fsm_event(event: &FsmEventV1) -> PublishedFsmEvent {
         FsmEventV1::PowerOn => PublishedFsmEvent::PowerOn,
         FsmEventV1::PowerOff => PublishedFsmEvent::PowerOff,
         FsmEventV1::UpdateRpm { rpm } => PublishedFsmEvent::UpdateRpm(*rpm),
+        FsmEventV1::HazardButtonChanged { pressed } => {
+            PublishedFsmEvent::HazardButtonChanged(*pressed)
+        }
         FsmEventV1::UpdateAmbientLux { lux } => PublishedFsmEvent::UpdateAmbientLux(*lux),
         FsmEventV1::FrontHeadlampOnAck => PublishedFsmEvent::FrontHeadlampOnAck,
         FsmEventV1::FrontHeadlampOffAck => PublishedFsmEvent::FrontHeadlampOffAck,

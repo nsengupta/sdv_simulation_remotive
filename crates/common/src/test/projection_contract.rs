@@ -3,7 +3,7 @@
 use crate::digital_twin::TwinMessage;
 use crate::fsm::FsmEvent;
 use crate::twin_runtime::connectors::{IngressToFsmProjector, ProjectionError, Projector};
-use crate::{LifecycleCommand, TwinIngressEvent, VssSignal};
+use crate::{ControlSignal, LifecycleCommand, TwinIngressEvent, VssSignal};
 
 #[test]
 fn canonical_twin_ingress_names_are_public_and_projectable() {
@@ -83,14 +83,33 @@ fn given_rpm_signal_when_projected_then_maps_exact_rpm() {
 }
 
 #[test]
-fn given_ambient_lux_signal_when_projected_then_maps_to_fsm_ambient_lux() {
+fn given_hazard_button_when_projected_then_maps_exact_state() {
     let projector = IngressToFsmProjector;
-    let out = projector
-        .project(TwinIngressEvent::Telemetry(VssSignal::AmbientLux(28)))
-        .expect("ambient lux projection must succeed");
-    match out {
-        TwinMessage::Fsm(FsmEvent::UpdateAmbientLux(v)) => assert_eq!(v, 28),
-        other => panic!("unexpected ambient lux mapping: {other:?}"),
+    for pressed in [false, true] {
+        let out = projector
+            .project(TwinIngressEvent::Control(ControlSignal::HazardButton(
+                pressed,
+            )))
+            .expect("hazard projection must succeed");
+        assert!(matches!(
+            out,
+            TwinMessage::Fsm(FsmEvent::HazardButtonChanged(actual)) if actual == pressed
+        ));
+    }
+}
+
+#[test]
+fn unsupported_phase_one_telemetry_is_rejected() {
+    let projector = IngressToFsmProjector;
+    for signal in [
+        VssSignal::Speed(50.0),
+        VssSignal::AmbientLux(28),
+        VssSignal::RainDetected(true),
+    ] {
+        let err = projector
+            .project(TwinIngressEvent::Telemetry(signal))
+            .expect_err("unsupported Phase I telemetry must be rejected");
+        assert!(matches!(err, ProjectionError::InvalidPayload(_)));
     }
 }
 
@@ -115,32 +134,6 @@ fn given_front_headlamp_off_confirmed_when_projected_then_maps_to_fsm() {
     match out {
         TwinMessage::Fsm(FsmEvent::FrontHeadlampOffAck) => {}
         other => panic!("unexpected off ack mapping: {other:?}"),
-    }
-}
-
-// ── Step 8: RainDetected projection ───────────────────────────────────────────
-
-#[test]
-fn given_rain_detected_true_when_projected_then_maps_to_rains_started() {
-    let projector = IngressToFsmProjector;
-    let out = projector
-        .project(TwinIngressEvent::Telemetry(VssSignal::RainDetected(true)))
-        .expect("rain detected projection must succeed");
-    match out {
-        TwinMessage::Fsm(FsmEvent::RainsStarted) => {}
-        other => panic!("unexpected rain=true mapping: {other:?}"),
-    }
-}
-
-#[test]
-fn given_rain_detected_false_when_projected_then_maps_to_rains_stopped() {
-    let projector = IngressToFsmProjector;
-    let out = projector
-        .project(TwinIngressEvent::Telemetry(VssSignal::RainDetected(false)))
-        .expect("rain detected false projection must succeed");
-    match out {
-        TwinMessage::Fsm(FsmEvent::RainsStopped) => {}
-        other => panic!("unexpected rain=false mapping: {other:?}"),
     }
 }
 

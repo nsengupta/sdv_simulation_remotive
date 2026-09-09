@@ -21,7 +21,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::digital_twin::{TwinMessage, ZoneReply};
-use crate::fsm::{AssemblyId, FsmState, HeadlampState};
+use crate::fsm::{AssemblyId, FsmEvent, FsmState, HeadlampState};
 use crate::observation_records::{PublishedFsmEvent, PublishedFsmState};
 use crate::test::{ActorGuard, power_on_to_idle, wait_fsm_state};
 use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
@@ -205,7 +205,7 @@ async fn given_ingress_immediately_after_power_on_when_startup_unblocks_then_com
     tokio::task::yield_now().await;
 
     controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::AmbientLux(900)))
+        .submit_fsm_event(FsmEvent::UpdateAmbientLux(900))
         .await
         .expect("lux during startup");
     controller

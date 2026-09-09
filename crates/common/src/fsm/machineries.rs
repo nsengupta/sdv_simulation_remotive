@@ -63,6 +63,7 @@ pub enum FsmEvent {
     PowerOn,
     PowerOff,
     UpdateRpm(u16),
+    HazardButtonChanged(bool),
     UpdateAmbientLux(u16),
     FrontHeadlampOnAck,
     FrontHeadlampOffAck,

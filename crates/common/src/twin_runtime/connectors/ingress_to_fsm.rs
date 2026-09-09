@@ -2,7 +2,7 @@ use super::projection::{ProjectionError, Projector};
 use crate::digital_twin::TwinMessage;
 use crate::domain_types::TwinIngressEvent;
 use crate::fsm::{FrontHeadlampIncompleteCause, FrontHeadlampSwitchDirection, FsmEvent};
-use crate::signals::{LifecycleCommand, VssSignal};
+use crate::signals::{ControlSignal, LifecycleCommand, VssSignal};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct IngressToFsmProjector;
@@ -12,6 +12,9 @@ impl Projector<TwinIngressEvent, TwinMessage> for IngressToFsmProjector {
         let fsm = match input {
             TwinIngressEvent::Lifecycle(LifecycleCommand::PowerOn) => FsmEvent::PowerOn,
             TwinIngressEvent::Lifecycle(LifecycleCommand::PowerOff) => FsmEvent::PowerOff,
+            TwinIngressEvent::Control(ControlSignal::HazardButton(pressed)) => {
+                FsmEvent::HazardButtonChanged(pressed)
+            }
             TwinIngressEvent::Telemetry(vss) => match vss {
                 VssSignal::Speed(_) => {
                     return Err(ProjectionError::InvalidPayload(
@@ -19,9 +22,16 @@ impl Projector<TwinIngressEvent, TwinMessage> for IngressToFsmProjector {
                     ));
                 }
                 VssSignal::EngineRpm(rpm) => FsmEvent::UpdateRpm(rpm),
-                VssSignal::AmbientLux(lux) => FsmEvent::UpdateAmbientLux(lux),
-                VssSignal::RainDetected(true) => FsmEvent::RainsStarted,
-                VssSignal::RainDetected(false) => FsmEvent::RainsStopped,
+                VssSignal::AmbientLux(_) => {
+                    return Err(ProjectionError::InvalidPayload(
+                        "AmbientLux is not accepted by the Phase I ingress boundary",
+                    ));
+                }
+                VssSignal::RainDetected(_) => {
+                    return Err(ProjectionError::InvalidPayload(
+                        "RainDetected is not accepted by the Phase I ingress boundary",
+                    ));
+                }
             },
             TwinIngressEvent::TimerTick => FsmEvent::TimerTick,
             TwinIngressEvent::SystemReset => FsmEvent::PowerOff,

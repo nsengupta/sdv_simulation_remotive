@@ -53,7 +53,7 @@ pub use observation_records::{
     PublishedWheelRpm, PublishedWiperContext, PublishedWiperState, SessionClock,
     elapsed_since_session,
 };
-pub use signals::{LifecycleCommand, VssSignal};
+pub use signals::{ControlSignal, LifecycleCommand, VssSignal};
 pub use twin_runtime::connectors::{IngressToFsmProjector, ProjectionError, Projector};
 pub use twin_runtime::controller::{
     ActuationCommand, ActuationError, ActuationFeedback, ActuationManager, CorrelationId,

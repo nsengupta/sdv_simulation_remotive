@@ -7,6 +7,7 @@ pub const ID_AMBIENT_LUX: u16 = 0x103;
 /// Binary rain-presence signal from the windshield rain sensor.
 /// `true` = rain detected; `false` = no rain.
 pub const ID_RAIN_DETECTED: u16 = 0x104;
+pub const ID_HAZARD: u16 = 0x105;
 
 /// A lifecycle request decoded from an external ingress carrier.
 ///
@@ -51,6 +52,42 @@ impl LifecycleCommand {
             socketcan::Error::from(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "lifecycle payload must fit a classic CAN frame",
+            ))
+        })
+    }
+}
+
+/// A validated driver control received from an external ingress carrier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlSignal {
+    HazardButton(bool),
+}
+
+impl ControlSignal {
+    /// Decode the strict two-byte hazard-button contract carried on standard CAN ID `0x105`.
+    pub fn from_can_frame(frame: &CanFrame) -> Option<Self> {
+        let socketcan::Id::Standard(id) = frame.id() else {
+            return None;
+        };
+        if id.as_raw() != ID_HAZARD {
+            return None;
+        }
+
+        match frame.data() {
+            [0, 0] => Some(Self::HazardButton(false)),
+            [1, 0] => Some(Self::HazardButton(true)),
+            _ => None,
+        }
+    }
+
+    /// Encode this control as the strict two-byte CAN `0x105` contract.
+    pub fn to_can_frame(&self) -> Result<CanFrame, socketcan::Error> {
+        let id = StandardId::new(ID_HAZARD).expect("hazard CAN ID is a valid standard ID");
+        let Self::HazardButton(pressed) = self;
+        CanFrame::new(id, &[*pressed as u8, 0]).ok_or_else(|| {
+            socketcan::Error::from(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "hazard payload must fit a classic CAN frame",
             ))
         })
     }

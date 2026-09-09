@@ -44,7 +44,7 @@ async fn off_silently_ignores_rpm_and_lux_without_observable_or_context_changes(
         .await
         .expect("submit RPM");
     controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::AmbientLux(7)))
+        .submit_fsm_event(FsmEvent::UpdateAmbientLux(7))
         .await
         .expect("submit lux");
 
@@ -286,7 +286,7 @@ async fn scenario_actuation_ack_round_trip_via_helper() {
     // bridge to Idle before sending lux (lux in PreparingToStart is a no-op).
     power_on_to_idle(&controller).await;
     controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::AmbientLux(20)))
+        .submit_fsm_event(FsmEvent::UpdateAmbientLux(20))
         .await
         .expect("low lux event");
 
@@ -336,7 +336,7 @@ async fn scenario_actuation_ack_surfaces_confirmation_on_diagnostic_sink() {
     // bridge to Idle before sending lux.
     power_on_to_idle(&controller).await;
     controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::AmbientLux(20)))
+        .submit_fsm_event(FsmEvent::UpdateAmbientLux(20))
         .await
         .expect("low lux event requests headlamp ON");
     controller
@@ -394,7 +394,7 @@ async fn scenario_actuation_nack_round_trip_via_helper() {
     // bridge to Idle before sending lux.
     power_on_to_idle(&controller).await;
     controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::AmbientLux(20)))
+        .submit_fsm_event(FsmEvent::UpdateAmbientLux(20))
         .await
         .expect("low lux event");
 

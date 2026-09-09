@@ -6,12 +6,12 @@
 use std::time::Instant;
 
 use crate::digital_twin::TwinMessage;
-use crate::fsm::HeadlampState;
+use crate::fsm::{FsmEvent, HeadlampState};
 use crate::observation_records::transition::{PublishedHeadlampContext, PublishedHeadlampState};
 use crate::test::{ActorGuard, expect_actuation_command, inject_matching_ack, power_on_to_idle};
 use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
 use crate::vehicle_state::{HeadlampContext, HeadlampMessage};
-use crate::{PublishedFsmEvent, TwinIngressEvent, VehicleController, VssSignal};
+use crate::{PublishedFsmEvent, VehicleController};
 use ractor::concurrency::Duration;
 use tokio::sync::mpsc;
 
@@ -83,7 +83,7 @@ async fn given_low_lux_and_on_ack_when_get_status_then_ledger_headlamp_matches_e
         .expect("ledger row for wiper zone ready → idle");
 
     controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::AmbientLux(20)))
+        .submit_fsm_event(FsmEvent::UpdateAmbientLux(20))
         .await
         .expect("low lux");
 

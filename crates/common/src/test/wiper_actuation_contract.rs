@@ -7,8 +7,7 @@ use std::time::Duration;
 use crate::DiagnosticKind;
 use crate::VehicleController;
 use crate::digital_twin::DigitalTwinCar;
-use crate::fsm::DomainAction;
-use crate::fsm::FsmState;
+use crate::fsm::{DomainAction, FsmEvent, FsmState};
 use crate::test::ActorGuard;
 use crate::test::{
     expect_actuation_command, install_with_actuation, power_on_to_idle,
@@ -23,7 +22,6 @@ use crate::twin_runtime::outcome_map::zone_outcomes_to_domain_actions;
 use crate::twin_runtime::zone_turn::ZoneOutcome;
 use crate::vehicle_state::WiperOutcome;
 use crate::vehicle_state::{VehicleContext, WiperState};
-use crate::{TwinIngressEvent, VssSignal};
 use tokio::sync::mpsc;
 
 // ── Step 2: DomainAction variants ─────────────────────────────────────────────
@@ -111,7 +109,7 @@ async fn given_idle_wiper_ready_when_rain_detected_true_ingress_then_running_and
     wait_wiper_state(&controller, WiperState::Ready, Duration::from_millis(500)).await;
 
     controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::RainDetected(true)))
+        .submit_fsm_event(FsmEvent::RainsStarted)
         .await
         .expect("rain ingress");
 
@@ -128,14 +126,14 @@ async fn given_wiper_running_when_rain_detected_false_ingress_then_ready_and_sto
     wait_wiper_state(&controller, WiperState::Ready, Duration::from_millis(500)).await;
 
     controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::RainDetected(true)))
+        .submit_fsm_event(FsmEvent::RainsStarted)
         .await
         .expect("start rain");
     let _ = expect_actuation_command(&mut actuation_rx, Duration::from_secs(1)).await;
     wait_wiper_state(&controller, WiperState::Running, Duration::from_millis(500)).await;
 
     controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::RainDetected(false)))
+        .submit_fsm_event(FsmEvent::RainsStopped)
         .await
         .expect("stop rain");
 
@@ -169,7 +167,7 @@ async fn given_rain_ingress_when_wiper_runs_then_diagnostics_prove_rain_wiper_co
     while diag_rx.try_recv().is_ok() {}
 
     controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::RainDetected(true)))
+        .submit_fsm_event(FsmEvent::RainsStarted)
         .await
         .expect("rain");
     wait_wiper_state(&controller, WiperState::Running, Duration::from_millis(500)).await;
@@ -189,7 +187,7 @@ async fn given_rain_ingress_when_wiper_runs_then_diagnostics_prove_rain_wiper_co
     assert!(saw_wiper, "expected WiperMotionChanged {{ wiping: true }}");
 
     controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::RainDetected(false)))
+        .submit_fsm_event(FsmEvent::RainsStopped)
         .await
         .expect("rain stop");
     wait_wiper_state(&controller, WiperState::Ready, Duration::from_millis(500)).await;
