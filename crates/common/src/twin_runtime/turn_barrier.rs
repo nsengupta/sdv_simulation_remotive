@@ -140,9 +140,11 @@ impl TurnBarrier {
     /// Whether the stored `tell_attempt` for `assembly_id` matches the incoming attempt number.
     /// Used in `on_zone_ready` and `on_zone_timeout` to discard stale / mismatched messages.
     pub fn tell_attempt_matches(&self, assembly_id: AssemblyId, tell_attempt: u32) -> bool {
-        self.zone_waits
-            .get(&assembly_id)
-            .map_or(false, |w| w.tell_attempt == tell_attempt)
+        self.pending.contains(&assembly_id)
+            && self
+                .zone_waits
+                .get(&assembly_id)
+                .is_some_and(|w| w.tell_attempt == tell_attempt)
     }
 
     /// The original zone message stored for `assembly_id`; needed to re-tell on timeout retry.
@@ -177,7 +179,14 @@ impl TurnBarrier {
 
     /// Apply a received assembly reply: remove from `pending`, store the reply, abort the live timer.
     pub fn act_on_zone_reply(&mut self, assembly_id: AssemblyId, reply: ZoneReply) {
-        self.pending.remove(&assembly_id);
+        if !self.pending.remove(&assembly_id) {
+            return;
+        }
+
+        // Retire all correlation and retry state at first acceptance. The barrier may remain
+        // queued behind an older head-of-buffer turn, but this assembly is permanently resolved.
+        self.zone_waits.remove(&assembly_id);
+        self.zone_messages.remove(&assembly_id);
         self.zone_replies.insert(assembly_id, reply);
         // Timer is still live → must abort to prevent a spurious ZoneTellBackTimeout.
         if let Some(timer) = self.zone_timers.remove(&assembly_id) {

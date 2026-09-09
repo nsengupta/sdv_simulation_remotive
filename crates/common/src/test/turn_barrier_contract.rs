@@ -36,7 +36,7 @@ use crate::observation_records::transition::{PublishedDomainAction, PublishedTra
 use crate::test::ActorGuard;
 use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
 use crate::vehicle_physics::LUX_ON_THRESHOLD;
-use crate::vehicle_state::{HeadlampContext, HeadlampZoneReply};
+use crate::vehicle_state::{HeadlampContext, HeadlampOutcome, HeadlampZoneReply};
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -82,13 +82,29 @@ async fn assert_no_row(rx: &mut mpsc::Receiver<PublishedTransitionRecord>, windo
 }
 
 fn inject_zone_ready(controller: &VehicleController, turn_id: u64, state: HeadlampState) {
+    inject_zone_ready_with(controller, turn_id, 0, state, Vec::<HeadlampOutcome>::new());
+}
+
+fn inject_zone_ready_with(
+    controller: &VehicleController,
+    turn_id: u64,
+    tell_attempt: u32,
+    state: HeadlampState,
+    outcomes: Vec<HeadlampOutcome>,
+) {
     controller
         .get_actor_ref()
         .send_message(TwinMessage::ZoneReady {
             zone_id: AssemblyId::Headlamp,
             turn_id,
-            tell_attempt: 0,
-            reply: zone_reply(state),
+            tell_attempt,
+            reply: ZoneReply::Headlamp(HeadlampZoneReply {
+                ctx: HeadlampContext {
+                    state,
+                    ack_pending_since: None,
+                },
+                outcomes,
+            }),
         })
         .expect("inject_zone_ready");
 }
@@ -185,6 +201,83 @@ async fn stale_timeout_after_retry_does_not_resolve_or_commit_barrier() {
             .actions
             .iter()
             .all(|action| !matches!(action, PublishedDomainAction::LogWarning(_)))
+    );
+}
+
+#[tokio::test]
+async fn duplicate_same_attempt_reply_cannot_overwrite_accepted_reply() {
+    let (controller, mut rx, _guard) = spawn_silent("ROB-DUPLICATE-REPLY").await;
+    boot_silent(&controller, &mut rx).await;
+
+    controller
+        .submit_fsm_event(FsmEvent::UpdateAmbientLux(20))
+        .await
+        .expect("front turn");
+    controller
+        .submit_fsm_event(FsmEvent::UpdateAmbientLux(10))
+        .await
+        .expect("rear turn");
+    tokio::task::yield_now().await;
+
+    inject_zone_ready_with(
+        &controller,
+        FIRST_USER_TURN + 1,
+        0,
+        HeadlampState::OnRequested,
+        vec![HeadlampOutcome::RequestOn],
+    );
+    inject_zone_ready(&controller, FIRST_USER_TURN + 1, HeadlampState::Ready);
+    inject_zone_ready(&controller, FIRST_USER_TURN, HeadlampState::Ready);
+
+    let rows = drain_n(&mut rx, 2, Duration::from_secs(1)).await;
+    assert!(
+        rows[1]
+            .actions
+            .contains(&PublishedDomainAction::RequestFrontHeadlampOn),
+        "duplicate reply replaced the first accepted outcome: {:?}",
+        rows[1].actions
+    );
+}
+
+#[tokio::test]
+async fn matching_timeout_after_accepted_reply_cannot_retry_or_alter_reply() {
+    let (controller, mut rx, _guard) = spawn_silent("ROB-TIMEOUT-AFTER-REPLY").await;
+    boot_silent(&controller, &mut rx).await;
+
+    controller
+        .submit_fsm_event(FsmEvent::UpdateAmbientLux(20))
+        .await
+        .expect("front turn");
+    controller
+        .submit_fsm_event(FsmEvent::UpdateAmbientLux(10))
+        .await
+        .expect("rear turn");
+    tokio::task::yield_now().await;
+
+    inject_zone_ready_with(
+        &controller,
+        FIRST_USER_TURN + 1,
+        0,
+        HeadlampState::OnRequested,
+        vec![HeadlampOutcome::RequestOn],
+    );
+    inject_timeout(&controller, FIRST_USER_TURN + 1, 0);
+    inject_zone_ready_with(
+        &controller,
+        FIRST_USER_TURN + 1,
+        1,
+        HeadlampState::Ready,
+        vec![],
+    );
+    inject_zone_ready(&controller, FIRST_USER_TURN, HeadlampState::Ready);
+
+    let rows = drain_n(&mut rx, 2, Duration::from_secs(1)).await;
+    assert!(
+        rows[1]
+            .actions
+            .contains(&PublishedDomainAction::RequestFrontHeadlampOn),
+        "post-reply timeout retried and allowed replacement: {:?}",
+        rows[1].actions
     );
 }
 
