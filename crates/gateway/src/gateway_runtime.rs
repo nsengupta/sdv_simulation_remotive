@@ -259,15 +259,18 @@ impl TwinRuntimeBuilder {
             None
         };
 
-        match actuation_egress_mode {
-            ActuationEgressMode::Null => {
-                tokio::spawn(drain_actuation_commands(actuation_cmd_rx));
-            }
-            ActuationEgressMode::LegacyCan => spawn_actuation_command_publishers(
-                actuation_cmd_rx,
-                can_interface.clone(),
-                headlamp_policy.clone(),
-            ),
+        if let ActuationEgressTask::NullDrain(task) = spawn_actuation_egress(
+            actuation_egress_mode,
+            actuation_cmd_rx,
+            can_interface.clone(),
+            headlamp_policy.clone(),
+            spawn_actuation_command_publishers,
+        ) {
+            tokio::spawn(async move {
+                if let Err(error) = task.await {
+                    eprintln!("[gateway] null actuation drain failed: {error}");
+                }
+            });
         }
 
         // CAN reader thread (blocking I/O)
@@ -335,13 +338,36 @@ impl Default for TwinRuntimeBuilder {
 // Private helpers
 // ---------------------------------------------------------------------------
 
-/// Consume commands until every sender closes, returning a shutdown diagnostic count.
-async fn drain_actuation_commands(mut actuation_cmd_rx: mpsc::Receiver<ActuationCommand>) -> usize {
-    let mut drained = 0;
-    while actuation_cmd_rx.recv().await.is_some() {
-        drained += 1;
+enum ActuationEgressTask {
+    NullDrain(JoinHandle<()>),
+    LegacyCan,
+}
+
+fn spawn_actuation_egress(
+    mode: ActuationEgressMode,
+    actuation_cmd_rx: mpsc::Receiver<ActuationCommand>,
+    can_interface: String,
+    front_headlamp_policy: Arc<Mutex<FrontHeadlampPolicy>>,
+    spawn_legacy_can: impl FnOnce(
+        mpsc::Receiver<ActuationCommand>,
+        String,
+        Arc<Mutex<FrontHeadlampPolicy>>,
+    ),
+) -> ActuationEgressTask {
+    match mode {
+        ActuationEgressMode::Null => {
+            ActuationEgressTask::NullDrain(tokio::spawn(drain_actuation_commands(actuation_cmd_rx)))
+        }
+        ActuationEgressMode::LegacyCan => {
+            spawn_legacy_can(actuation_cmd_rx, can_interface, front_headlamp_policy);
+            ActuationEgressTask::LegacyCan
+        }
     }
-    drained
+}
+
+/// Consume commands until every sender closes.
+async fn drain_actuation_commands(mut actuation_cmd_rx: mpsc::Receiver<ActuationCommand>) {
+    while actuation_cmd_rx.recv().await.is_some() {}
 }
 
 /// Dedicated OS thread for blocking `read_frame` loop.
@@ -601,8 +627,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn null_actuation_egress_drains_every_command_until_channel_closes() {
+    async fn runtime_selector_uses_only_null_drain_and_completes_at_channel_closure() {
         let (tx, rx) = mpsc::channel(4);
+        let task = match spawn_actuation_egress(
+            ActuationEgressMode::Null,
+            rx,
+            "must-not-open-can".to_string(),
+            Arc::new(Mutex::new(FrontHeadlampPolicy::default())),
+            |_, _, _| panic!("Null mode invoked legacy CAN publisher spawning"),
+        ) {
+            ActuationEgressTask::NullDrain(task) => task,
+            ActuationEgressTask::LegacyCan => {
+                panic!("Null mode selected legacy CAN publishers")
+            }
+        };
+
         tx.send(ActuationCommand::StartWiper)
             .await
             .expect("send wiper command");
@@ -619,7 +658,11 @@ mod tests {
         .expect("send turn-light command");
         drop(tx);
 
-        assert_eq!(drain_actuation_commands(rx).await, 2);
+        let completion: () = tokio::time::timeout(std::time::Duration::from_millis(250), task)
+            .await
+            .expect("null drain did not finish when all senders closed")
+            .expect("null drain task panicked");
+        assert_eq!(completion, ());
     }
 
     #[tokio::test]
