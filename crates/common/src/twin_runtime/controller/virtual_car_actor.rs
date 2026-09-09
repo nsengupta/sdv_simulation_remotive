@@ -335,14 +335,9 @@ impl VirtualCarActor {
         now: Instant,
     ) -> Result<(), ActorProcessingErr> {
         match message {
-            ZoneMessage::Bcm(m) => tell_bcm_zone(
-                &runtime_state.bcm_actor,
-                brain,
-                turn_id,
-                tell_attempt,
-                *m,
-                now,
-            ),
+            ZoneMessage::Bcm(m) => {
+                tell_bcm_zone(&runtime_state.bcm_actor, brain, turn_id, tell_attempt, *m)
+            }
             ZoneMessage::Headlamp(m) => tell_headlamp_zone(
                 &runtime_state.headlamp_actor,
                 brain,
@@ -497,6 +492,7 @@ impl VirtualCarActor {
         };
 
         match outcome {
+            TimeoutOutcome::Ignored => {}
             TimeoutOutcome::Retry { next_attempt } => {
                 let (msg, barrier_now) = runtime_state
                     .barrier_queue

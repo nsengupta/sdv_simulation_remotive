@@ -39,6 +39,8 @@ pub(crate) type TellBackTimer = JoinHandle<Result<(), MessagingErr<TwinMessage>>
 
 /// Decision returned by [`TurnBarrier::act_on_zone_timeout`].
 pub(crate) enum TimeoutOutcome {
+    /// Timeout belongs to a superseded attempt or resolved zone; make no state change.
+    Ignored,
     /// Retry budget remains; caller must re-tell the zone and call
     /// [`TurnBarrier::store_retry_timer`] with the fresh handle.
     Retry { next_attempt: u32 },
@@ -197,15 +199,17 @@ impl TurnBarrier {
         assembly_id: AssemblyId,
         tell_attempt: u32,
     ) -> TimeoutOutcome {
-        // Timer has already fired — drop the stale handle, no abort needed.
-        let _ = self.zone_timers.remove(&assembly_id);
-
         let Some(wait) = self.zone_waits.get_mut(&assembly_id) else {
-            // No wait state means this assembly was already resolved; treat as give-up.
-            return TimeoutOutcome::GaveUp;
+            return TimeoutOutcome::Ignored;
         };
 
-        if wait.tell_attempt == tell_attempt && wait.retries_remaining > 0 {
+        if wait.tell_attempt != tell_attempt {
+            return TimeoutOutcome::Ignored;
+        }
+
+        // Only the current attempt may consume its timer or retry budget.
+        let _ = self.zone_timers.remove(&assembly_id);
+        if wait.retries_remaining > 0 {
             // Advance attempt counter so later replies from the old attempt are stale.
             wait.tell_attempt = wait.tell_attempt.saturating_add(1);
             wait.retries_remaining -= 1;
@@ -213,7 +217,6 @@ impl TurnBarrier {
                 next_attempt: wait.tell_attempt,
             }
         } else {
-            // Attempt mismatch (stale) or no retries left.
             TimeoutOutcome::GaveUp
         }
     }

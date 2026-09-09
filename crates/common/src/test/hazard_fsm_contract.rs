@@ -29,6 +29,32 @@ fn power_lifecycle_waits_for_bcm_only() {
 }
 
 #[test]
+fn hazard_self_loops_in_every_active_mode_before_unrelated_context_guards() {
+    let now = Instant::now();
+
+    let mut driving_ctx = VehicleContext::default();
+    driving_ctx.powertrain.apply_rpm(7_500);
+    driving_ctx.powertrain.refresh_speed();
+
+    let mut dangerous_ctx = VehicleContext::default();
+    dangerous_ctx.headlamp.state = crate::vehicle_state::HeadlampState::On;
+    dangerous_ctx.visibility.ambient_lux = u16::MAX;
+
+    let warning_ctx = VehicleContext::default();
+
+    for (state, ctx) in [
+        (FsmState::Idle, VehicleContext::default()),
+        (FsmState::Driving, driving_ctx),
+        (FsmState::DrivingDangerously, dangerous_ctx),
+        (FsmState::ExtremeOperationWarning(now), warning_ctx),
+    ] {
+        let result = transition(&state, &FsmEvent::HazardButtonChanged(true), &ctx, now);
+        assert_eq!(result.next_state, state, "hazard moved active mode");
+        assert!(result.note.is_none());
+    }
+}
+
+#[test]
 fn active_hazard_updates_sccm_and_bcm_and_maps_one_atomic_action() {
     let now = Instant::now();
     for state in [

@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use ractor::{Actor, ActorProcessingErr, ActorRef};
-use std::time::Instant;
 
 use crate::digital_twin::{TwinMessage, ZoneReply};
 use crate::vehicle_state::{BcmContext, BcmMessage};
@@ -8,7 +7,6 @@ use crate::vehicle_state::{BcmContext, BcmMessage};
 #[derive(Debug)]
 pub struct BcmActorVocabulary {
     pub message: BcmMessage,
-    pub now: Instant,
     pub turn_id: u64,
     pub tell_attempt: u32,
     pub brain: ActorRef<TwinMessage>,
@@ -82,11 +80,9 @@ pub fn tell_bcm_zone(
     turn_id: u64,
     tell_attempt: u32,
     message: BcmMessage,
-    now: Instant,
 ) -> Result<(), ActorProcessingErr> {
     bcm.send_message(BcmActorMsg::Apply(BcmActorVocabulary {
         message,
-        now,
         turn_id,
         tell_attempt,
         brain: brain.clone(),

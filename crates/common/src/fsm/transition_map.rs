@@ -95,6 +95,10 @@ pub fn transition(
             },
         },
         Idle => match event {
+            HazardButtonChanged(_) => TransitionResult {
+                next_state: Idle,
+                note: None,
+            },
             PowerOff => TransitionResult {
                 next_state: PreparingToStop(ALL_ASSEMBLIES.iter().copied().collect()),
                 note: None,
@@ -109,6 +113,10 @@ pub fn transition(
             },
         },
         Driving => match event {
+            HazardButtonChanged(_) => TransitionResult {
+                next_state: Driving,
+                note: None,
+            },
             Internal(Operational::LightingUnsafe) => TransitionResult {
                 next_state: DrivingDangerously,
                 note: None,
@@ -131,6 +139,10 @@ pub fn transition(
             },
         },
         DrivingDangerously => match event {
+            HazardButtonChanged(_) => TransitionResult {
+                next_state: DrivingDangerously,
+                note: None,
+            },
             PowerOff => TransitionResult {
                 next_state: DrivingDangerously,
                 note: Some(TransitionNote::RejectedPowerOff),
@@ -153,6 +165,10 @@ pub fn transition(
             },
         },
         ExtremeOperationWarning(began_at) => match event {
+            HazardButtonChanged(_) => TransitionResult {
+                next_state: ExtremeOperationWarning(*began_at),
+                note: None,
+            },
             // Abrupt standstill (e.g. EngineRpm(0) trailer): waive cooldown.
             PowerOff if current_ctx.powertrain.is_stationary() => TransitionResult {
                 next_state: PreparingToStop(ALL_ASSEMBLIES.iter().copied().collect()),

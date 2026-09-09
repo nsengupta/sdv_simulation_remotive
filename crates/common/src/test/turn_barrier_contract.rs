@@ -153,6 +153,41 @@ async fn boot_silent(
     drain_n(rx, 2, std::time::Duration::from_secs(3)).await;
 }
 
+#[tokio::test]
+async fn stale_timeout_after_retry_does_not_resolve_or_commit_barrier() {
+    let (controller, mut rx, _guard) = spawn_silent("ROB-STALE-TIMEOUT").await;
+    boot_silent(&controller, &mut rx).await;
+
+    controller
+        .submit_fsm_event(FsmEvent::UpdateAmbientLux(20))
+        .await
+        .expect("headlamp turn");
+    tokio::task::yield_now().await;
+
+    inject_timeout(&controller, FIRST_USER_TURN, 0);
+    tokio::task::yield_now().await;
+    inject_timeout(&controller, FIRST_USER_TURN, 0);
+    assert_no_row(&mut rx, Duration::from_millis(20)).await;
+
+    controller
+        .get_actor_ref()
+        .send_message(TwinMessage::ZoneReady {
+            zone_id: AssemblyId::Headlamp,
+            turn_id: FIRST_USER_TURN,
+            tell_attempt: 1,
+            reply: zone_reply(HeadlampState::Ready),
+        })
+        .expect("current-attempt reply");
+    let rows = drain_n(&mut rx, 1, Duration::from_secs(1)).await;
+    assert_eq!(rows.len(), 1);
+    assert!(
+        rows[0]
+            .actions
+            .iter()
+            .all(|action| !matches!(action, PublishedDomainAction::LogWarning(_)))
+    );
+}
+
 // ── Test 1 ──────────────────────────────────────────────────────────────────
 
 /// Two zone-directed events; rear-barrier reply arrives before front-barrier reply.
