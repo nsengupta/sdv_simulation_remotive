@@ -83,7 +83,7 @@ pub struct TwinRuntimeBuilder {
     diagnostic_tx: Option<mpsc::UnboundedSender<DiagnosticRecord>>,
     transition_tx: Option<mpsc::Sender<PublishedTransitionRecord>>,
     headlamp_policy: Arc<Mutex<FrontHeadlampPolicy>>,
-    /// When true (default), `spawn_runtime` sends `PowerOn` after install. Dashboard sets false.
+    /// Optional compatibility switch. Phase I defaults to bridge-owned lifecycle.
     auto_power_on: bool,
     /// When true, format headlamp ACK/NACK ingress lines to stdout. Default false so an
     /// in-process Dashboard TTY is not corrupted. Standalone gateway enables this.
@@ -103,7 +103,7 @@ impl TwinRuntimeBuilder {
             diagnostic_tx: None,
             transition_tx: None,
             headlamp_policy: Arc::new(Mutex::new(FrontHeadlampPolicy::default())),
-            auto_power_on: true,
+            auto_power_on: false,
             ingress_console_log: false,
             actuation_cmd_rx: None,
             actuation_egress_mode: ActuationEgressMode::default(),
@@ -140,8 +140,8 @@ impl TwinRuntimeBuilder {
         self
     }
 
-    /// When `true`, [`Self::spawn_runtime`] sends `PowerOn` after workers start (gateway / CI default).
-    /// Dashboard must pass `false` so the operator controls Start — see `DESIGN.md` §16.
+    /// When `true`, [`Self::spawn_runtime`] sends `PowerOn` after workers start.
+    /// Phase I Gateway callers leave this disabled because the Remotive bridge owns lifecycle.
     pub fn with_auto_power_on(mut self, enabled: bool) -> Self {
         self.auto_power_on = enabled;
         self
@@ -680,9 +680,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn builder_auto_power_on_defaults_true() {
+    async fn builder_defaults_to_bridge_owned_lifecycle() {
         let builder = TwinRuntimeBuilder::new();
-        assert!(builder.auto_power_on());
+        assert!(!builder.auto_power_on());
     }
 
     #[tokio::test]

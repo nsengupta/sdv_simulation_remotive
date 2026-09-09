@@ -50,7 +50,7 @@ async fn run_with_capture(args: GatewayArgs) -> Result<()> {
     let mut builder = TwinRuntimeBuilder::new()
         .with_car_identity(VIRTUAL_CAR_IDENTITY)
         .with_can_interface(gateway_runtime::DEFAULT_CAN_INTERFACE)
-        .with_auto_power_on(true)
+        .with_auto_power_on(false)
         .with_ingress_console_log(true);
 
     if args.trace_actuation_ingress {

@@ -5,6 +5,7 @@ members = [
     "crates/vehicle_device_bus",
     "crates/gateway",
     "crates/emulator",
+    "crates/remotive_bridge",
     "crates/front_headlamp_actuator",
     "crates/wiper_actuator",
     "crates/tui_dashboard", # Add this here
