@@ -25,6 +25,7 @@ use common::facade::{
     VehicleControllerRuntimeOptions, VssSignal, spawn_stdout_diagnostic_observer,
 };
 use socketcan::{CanSocket, Socket};
+use std::future::Future;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -293,14 +294,13 @@ impl TwinRuntimeBuilder {
             }
         }
 
-        if auto_power_on {
-            let c = controller.clone();
-            tokio::spawn(async move {
+        let c = controller.clone();
+        let _auto_power_on_task =
+            spawn_auto_power_on_if_enabled(auto_power_on, move || async move {
                 if let Err(e) = c.send_power_on().await {
                     eprintln!("[gateway] PowerOn failed: {e:?}");
                 }
             });
-        }
 
         // Spawn ingress dispatch loop and return its JoinHandle.
         let dispatch = tokio::spawn(run_can_ingress_dispatch_loop(
@@ -337,6 +337,17 @@ impl Default for TwinRuntimeBuilder {
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
+
+fn spawn_auto_power_on_if_enabled<Action, ActionFuture>(
+    enabled: bool,
+    action: Action,
+) -> Option<JoinHandle<()>>
+where
+    Action: FnOnce() -> ActionFuture + Send + 'static,
+    ActionFuture: Future<Output = ()> + Send + 'static,
+{
+    enabled.then(|| tokio::spawn(action()))
+}
 
 enum ActuationEgressTask {
     NullDrain(JoinHandle<()>),
@@ -683,6 +694,21 @@ mod tests {
     async fn builder_defaults_to_bridge_owned_lifecycle() {
         let builder = TwinRuntimeBuilder::new();
         assert!(!builder.auto_power_on());
+    }
+
+    #[tokio::test]
+    async fn bridge_owned_lifecycle_runtime_never_schedules_gateway_power_on() {
+        let builder = TwinRuntimeBuilder::new();
+        let invoked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let invoked_by_action = Arc::clone(&invoked);
+
+        let task = spawn_auto_power_on_if_enabled(builder.auto_power_on(), move || async move {
+            invoked_by_action.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        assert!(task.is_none());
+        tokio::task::yield_now().await;
+        assert!(!invoked.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[tokio::test]

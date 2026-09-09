@@ -42,6 +42,22 @@ impl HazardSource for FakeHazards {
     }
 }
 
+struct RepeatingHazards {
+    remaining: usize,
+}
+
+#[async_trait]
+impl HazardSource for RepeatingHazards {
+    async fn next_hazard(&mut self) -> Result<HazardRead> {
+        if self.remaining == 0 {
+            pending().await
+        } else {
+            self.remaining -= 1;
+            Ok(HazardRead::Value(true))
+        }
+    }
+}
+
 struct FakeRpm(VecDeque<u16>);
 
 #[async_trait]
@@ -155,12 +171,47 @@ async fn readings_limit_orders_power_on_body_and_controlled_trailer() {
 }
 
 #[tokio::test]
-async fn duplicate_hazards_each_emit_a_strict_can_frame() {
+async fn sustained_ready_hazards_cannot_run_ahead_of_ready_rpm_until_exhaustion() {
     let mut sink = RecordingSink::default();
-    let mut hazards = FakeHazards(VecDeque::from([
-        Ok(HazardRead::Value(true)),
-        Ok(HazardRead::Value(true)),
-    ]));
+    let mut hazards = RepeatingHazards { remaining: 64 };
+    let mut rpm = FakeRpm(VecDeque::from([1200]));
+    let mut shutdown = PendingShutdown;
+
+    run_session(
+        &mut sink,
+        &mut hazards,
+        &mut rpm,
+        &mut shutdown,
+        SessionConfig {
+            max_readings: NonZeroUsize::new(1),
+        },
+    )
+    .await
+    .unwrap();
+
+    let rpm_index = sink
+        .frames
+        .iter()
+        .position(|frame| VssSignal::from_can_frame(frame) == Some(VssSignal::EngineRpm(1200)))
+        .expect("ready RPM must be emitted");
+    let hazard_count_before_rpm = sink.frames[..rpm_index]
+        .iter()
+        .filter(|frame| {
+            ControlSignal::from_can_frame(frame) == Some(ControlSignal::HazardButton(true))
+        })
+        .count();
+
+    assert!(
+        hazard_count_before_rpm <= 1,
+        "fair scheduler allowed more than one queued hazard ahead of ready RPM"
+    );
+    assert_controlled_edges(&sink.frames);
+}
+
+#[tokio::test]
+async fn sustained_ready_hazards_cannot_starve_ready_shutdown() {
+    let mut sink = RecordingSink::default();
+    let mut hazards = RepeatingHazards { remaining: 64 };
     let mut rpm = FakeRpm(VecDeque::new());
     let mut shutdown = ImmediateShutdown;
 
@@ -174,6 +225,42 @@ async fn duplicate_hazards_each_emit_a_strict_can_frame() {
     .await
     .unwrap();
 
+    let hazard_count = sink
+        .frames
+        .iter()
+        .filter(|frame| {
+            ControlSignal::from_can_frame(frame) == Some(ControlSignal::HazardButton(true))
+        })
+        .count();
+    assert!(
+        hazard_count <= 1,
+        "fair scheduler allowed more than one queued hazard ahead of ready shutdown"
+    );
+    assert_controlled_edges(&sink.frames);
+}
+
+#[tokio::test]
+async fn duplicate_hazards_each_emit_a_strict_can_frame() {
+    let mut sink = RecordingSink::default();
+    let mut hazards = FakeHazards(VecDeque::from([
+        Ok(HazardRead::Value(true)),
+        Ok(HazardRead::Value(true)),
+        Ok(HazardRead::End),
+    ]));
+    let mut rpm = FakeRpm(VecDeque::new());
+    let mut shutdown = PendingShutdown;
+
+    let error = run_session(
+        &mut sink,
+        &mut hazards,
+        &mut rpm,
+        &mut shutdown,
+        SessionConfig::default(),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error.to_string().contains("broker stream ended"));
     assert_eq!(
         sink.frames
             .iter()
