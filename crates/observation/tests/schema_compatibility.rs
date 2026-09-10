@@ -6,11 +6,40 @@ use observation::{ObservationError, RunReader, RunWriter};
 use support::{RUN_ID, VEHICLE, fixed_run_metadata, sample_diagnostic, sample_ledger};
 
 #[test]
-fn pre_phase_i_v3_ledger_defaults_missing_sccm_and_bcm_contexts() {
+fn pre_phase_i_v3_run_reads_with_defaulted_sccm_and_bcm_contexts() {
+    let temp = tempfile::tempdir().unwrap();
+    let run_dir = temp.path().join(RUN_ID);
+    std::fs::create_dir(&run_dir).unwrap();
+    std::fs::write(
+        run_dir.join("manifest.json"),
+        format!(
+            r#"{{
+  "schema_version": 3,
+  "run_id": "{RUN_ID}",
+  "created_at": {{"unix_seconds": 1784260800, "nanosecond": 0}},
+  "session_started_at": {{"unix_seconds": 1784260800, "nanosecond": 0}},
+  "vehicle": {{"identity": "{VEHICLE}"}},
+  "scenario": null,
+  "streams": {{"diagnostic": "diagnostic.jsonl", "ledger": "ledger.jsonl"}}
+}}"#
+        ),
+    )
+    .unwrap();
+    std::fs::write(run_dir.join("diagnostic.jsonl"), "").unwrap();
     let fixture = include_str!("fixtures/pre_phase_i_v3_ledger.json");
-    let envelope: observation::schema::v1::StreamEnvelopeV1<
-        observation::schema::v1::LedgerPayloadV1,
-    > = serde_json::from_str(fixture).expect("pre-Phase-I schema-v3 ledger must deserialize");
+    let fixture: serde_json::Value = serde_json::from_str(fixture).unwrap();
+    std::fs::write(
+        run_dir.join("ledger.jsonl"),
+        format!("{}\n", serde_json::to_string(&fixture).unwrap()),
+    )
+    .unwrap();
+    let reader = RunReader::open(&run_dir).expect("schema-v3 manifest must remain supported");
+    let envelope = reader
+        .ledger()
+        .unwrap()
+        .next()
+        .unwrap()
+        .expect("pre-Phase-I schema-v3 ledger must deserialize");
 
     for context in [&envelope.payload.old_ctx, &envelope.payload.current_ctx] {
         assert!(!context.sccm.hazard_button_on);
@@ -31,6 +60,28 @@ fn write_fixture(parent: &Path) -> PathBuf {
     writer.record_ledger(&sample_ledger()).unwrap();
     writer.finish().unwrap();
     parent.join(RUN_ID)
+}
+
+#[test]
+fn new_writer_emits_schema_v4_manifest_and_rows() {
+    let temp = tempfile::tempdir().unwrap();
+    let run_dir = write_fixture(temp.path());
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("manifest.json")).unwrap())
+            .unwrap();
+    assert_eq!(manifest["schema_version"], 4);
+
+    for stream in ["diagnostic.jsonl", "ledger.jsonl"] {
+        let row: serde_json::Value = serde_json::from_str(
+            std::fs::read_to_string(run_dir.join(stream))
+                .unwrap()
+                .lines()
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(row["schema_version"], 4, "{stream}");
+    }
 }
 
 fn mutate_json_file(path: &Path, mutate: impl FnOnce(&mut serde_json::Value)) {
@@ -66,14 +117,14 @@ fn manifest_schema_version_mismatch_is_rejected() {
     let temp = tempfile::tempdir().unwrap();
     let run_dir = write_fixture(temp.path());
     mutate_json_file(&run_dir.join("manifest.json"), |value| {
-        value["schema_version"] = serde_json::json!(4);
+        value["schema_version"] = serde_json::json!(5);
     });
 
     let error = RunReader::open(&run_dir).unwrap_err();
     match error {
         ObservationError::UnsupportedSchema { found, supported } => {
-            assert_eq!(found, 4);
-            assert_eq!(supported, 3);
+            assert_eq!(found, 5);
+            assert_eq!(supported, 4);
         }
         other => panic!("expected UnsupportedSchema, got {other:?}"),
     }
@@ -103,17 +154,17 @@ fn diagnostic_row_schema_version_mismatch_is_rejected() {
     let temp = tempfile::tempdir().unwrap();
     let run_dir = write_fixture(temp.path());
     mutate_jsonl_line(&run_dir.join("diagnostic.jsonl"), 1, |value| {
-        value["schema_version"] = serde_json::json!(4);
+        value["schema_version"] = serde_json::json!(3);
     });
 
     let reader = RunReader::open(&run_dir).unwrap();
     let error = reader.diagnostics().unwrap().next().unwrap().unwrap_err();
     match error {
-        ObservationError::UnsupportedSchema { found, supported } => {
-            assert_eq!(found, 4);
-            assert_eq!(supported, 3);
+        ObservationError::SchemaVersionMismatch { manifest, row } => {
+            assert_eq!(manifest, 4);
+            assert_eq!(row, 3);
         }
-        other => panic!("expected UnsupportedSchema, got {other:?}"),
+        other => panic!("expected SchemaVersionMismatch, got {other:?}"),
     }
 }
 

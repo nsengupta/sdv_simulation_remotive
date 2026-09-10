@@ -1,8 +1,8 @@
 //! Manifest-validated, lazy readers for a captured run directory.
 //!
 //! `RunReader::open` never trusts the manifest's declared schema version until it has parsed the
-//! manifest as an untyped `serde_json::Value`, extracted `schema_version`, and confirmed it is
-//! `1` — see `docs/DESIGN.md`. Only then
+//! manifest as an untyped `serde_json::Value`, extracted `schema_version`, and confirmed it is a
+//! deliberately supported version (v3 or v4) — see `docs/DESIGN.md`. Only then
 //! does it deserialize the concrete `ManifestV1` and validate the two declared stream filenames.
 //! Every stream row is re-validated the same way as it is read, one line at a time, so corrupt or
 //! foreign artifacts fail with contextual errors instead of silently loading.
@@ -15,11 +15,11 @@ use std::path::{Path, PathBuf};
 use serde::de::DeserializeOwned;
 
 use crate::ObservationError;
-use crate::schema::CURRENT_SCHEMA_VERSION;
 use crate::schema::v1::{
     DiagnosticPayloadV1, LedgerPayloadV1, ManifestV1, RunId, StreamEnvelopeV1, StreamsV1,
     UnixTimestampV1,
 };
+use crate::schema::{CURRENT_SCHEMA_VERSION, is_supported_schema_version};
 
 const MANIFEST_FILE_NAME: &str = "manifest.json";
 const DIAGNOSTIC_FILE_NAME: &str = "diagnostic.jsonl";
@@ -51,6 +51,7 @@ pub struct LineRecords<T> {
     expected_run_id: RunId,
     expected_vehicle: String,
     expected_session_started_at: UnixTimestampV1,
+    expected_schema_version: u32,
     line: usize,
     finished: bool,
     _payload: PhantomData<T>,
@@ -87,6 +88,7 @@ impl<T> std::fmt::Debug for LineRecords<T> {
                 &self.expected_session_started_at,
             )
             .field("line", &self.line)
+            .field("expected_schema_version", &self.expected_schema_version)
             .field("finished", &self.finished)
             .finish()
     }
@@ -142,10 +144,16 @@ impl<T: DeserializeOwned + HasSessionStartedAt> LineRecords<T> {
                 line: self.line,
                 message: format!("schema_version {found_version_u64} is out of range for u32"),
             })?;
-        if found_version != CURRENT_SCHEMA_VERSION {
+        if !is_supported_schema_version(found_version) {
             return Err(ObservationError::UnsupportedSchema {
                 found: found_version,
                 supported: CURRENT_SCHEMA_VERSION,
+            });
+        }
+        if found_version != self.expected_schema_version {
+            return Err(ObservationError::SchemaVersionMismatch {
+                manifest: self.expected_schema_version,
+                row: found_version,
             });
         }
 
@@ -227,6 +235,7 @@ impl RunReader {
             expected_run_id: self.manifest.run_id.clone(),
             expected_vehicle: self.manifest.vehicle.identity.clone(),
             expected_session_started_at: self.manifest.session_started_at,
+            expected_schema_version: self.manifest.schema_version,
             line: 0,
             finished: false,
             _payload: PhantomData,
@@ -256,7 +265,7 @@ fn read_manifest(path: &Path) -> Result<ManifestV1, ObservationError> {
         u32::try_from(found_version_u64).map_err(|_| ObservationError::InvalidManifest {
             message: format!("schema_version {found_version_u64} is out of range for u32"),
         })?;
-    if found_version != CURRENT_SCHEMA_VERSION {
+    if !is_supported_schema_version(found_version) {
         return Err(ObservationError::UnsupportedSchema {
             found: found_version,
             supported: CURRENT_SCHEMA_VERSION,

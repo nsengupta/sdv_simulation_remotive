@@ -18,6 +18,8 @@ pub enum ObservationError {
     InvalidTimestamp { value: String, reason: String },
     #[error("unsupported observation schema version {found}; supported version is {supported}")]
     UnsupportedSchema { found: u32, supported: u32 },
+    #[error("record schema version {row} does not match manifest schema version {manifest}")]
+    SchemaVersionMismatch { manifest: u32, row: u32 },
     #[error("{stream} line {line}: {message}")]
     InvalidRecord {
         stream: PathBuf,

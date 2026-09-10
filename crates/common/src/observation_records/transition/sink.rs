@@ -6,8 +6,7 @@
 //! in sink implementations / receivers, not in the actor.
 
 use super::PublishedTransitionRecord;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,40 +14,28 @@ pub enum TransitionSinkError {
     Closed,
 }
 
+#[async_trait]
 pub trait TransitionRecordSink: Send + Sync {
-    fn emit(&self, record: PublishedTransitionRecord) -> Result<(), TransitionSinkError>;
+    async fn emit(&self, record: PublishedTransitionRecord) -> Result<(), TransitionSinkError>;
 }
 
 #[derive(Clone)]
 pub struct TokioMpscTransitionRecordSink {
-    tx: mpsc::UnboundedSender<PublishedTransitionRecord>,
-    closed: Arc<AtomicBool>,
+    tx: mpsc::Sender<PublishedTransitionRecord>,
 }
 
 impl TokioMpscTransitionRecordSink {
-    pub fn new(downstream: mpsc::Sender<PublishedTransitionRecord>) -> Self {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let closed = Arc::new(AtomicBool::new(false));
-        let closed_by_forwarder = Arc::clone(&closed);
-        tokio::spawn(async move {
-            while let Some(record) = rx.recv().await {
-                if downstream.send(record).await.is_err() {
-                    closed_by_forwarder.store(true, Ordering::Release);
-                    break;
-                }
-            }
-        });
-        Self { tx, closed }
+    pub fn new(tx: mpsc::Sender<PublishedTransitionRecord>) -> Self {
+        Self { tx }
     }
 }
 
+#[async_trait]
 impl TransitionRecordSink for TokioMpscTransitionRecordSink {
-    fn emit(&self, record: PublishedTransitionRecord) -> Result<(), TransitionSinkError> {
-        if self.closed.load(Ordering::Acquire) {
-            return Err(TransitionSinkError::Closed);
-        }
+    async fn emit(&self, record: PublishedTransitionRecord) -> Result<(), TransitionSinkError> {
         self.tx
             .send(record)
+            .await
             .map_err(|_| TransitionSinkError::Closed)
     }
 }

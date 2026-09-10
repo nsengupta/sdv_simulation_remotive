@@ -1,9 +1,13 @@
 //! Schema dispatch and version constant.
 //!
-//! Archival DTOs live in [`v1`] (module name retained). [`CURRENT_SCHEMA_VERSION`] is **3**
-//! (weather + wiper on vehicle context; real rain FSM events). A future incompatible shape adds
-//! a sibling module and an explicit reader dispatch path rather than weakening the version check.
+//! Archival DTOs live in [`v1`] (module name retained). Version 3 is retained as a read-only
+//! compatibility shape via serde defaults; version 4 is emitted for Phase I hazard vocabulary.
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const MIN_SUPPORTED_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
+
+pub fn is_supported_schema_version(version: u32) -> bool {
+    (MIN_SUPPORTED_SCHEMA_VERSION..=CURRENT_SCHEMA_VERSION).contains(&version)
+}
 
 pub mod v1;

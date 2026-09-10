@@ -7,7 +7,7 @@ use support::{RUN_ID, fixed_run_metadata, sample_diagnostic, sample_ledger};
 
 fn golden_run_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("testdata/golden/v3")
+        .join("testdata/golden/v4")
         .join(RUN_ID)
 }
 

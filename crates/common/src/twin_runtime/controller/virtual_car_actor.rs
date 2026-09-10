@@ -662,12 +662,13 @@ impl VirtualCarActor {
 
         for hop in &quiescent.hops {
             let record_seq = runtime_state.next_record_seq;
-            runtime_state.next_record_seq = runtime_state.next_record_seq.saturating_add(1);
             Self::emit_transition_record(
                 runtime_state,
                 record_seq,
                 hop.result.transition_record.clone(),
-            );
+            )
+            .await?;
+            runtime_state.next_record_seq = runtime_state.next_record_seq.saturating_add(1);
         }
 
         runtime_state.twin_car.apply_step(
@@ -784,13 +785,13 @@ impl VirtualCarActor {
         Ok(())
     }
 
-    fn emit_transition_record(
+    async fn emit_transition_record(
         runtime_state: &mut VirtualCarRuntimeState,
         record_seq: u64,
         transition_record: fsm::RawTransitionRecord,
-    ) {
+    ) -> Result<(), ActorProcessingErr> {
         let Some(sink) = &runtime_state.transition_sink else {
-            return;
+            return Ok(());
         };
 
         let published = PublishedTransitionRecord::project(
@@ -800,7 +801,7 @@ impl VirtualCarActor {
             &runtime_state.session_clock,
         );
 
-        if let Err(err) = sink.emit(published) {
+        if let Err(err) = sink.emit(published).await {
             let diag_sink = &runtime_state.diagnostic_sink;
             match err {
                 TransitionSinkError::Closed => {
@@ -810,7 +811,12 @@ impl VirtualCarActor {
                     }
                 }
             }
+            return Err(ActorProcessingErr::from(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "transition record channel closed before commit",
+            )));
         }
+        Ok(())
     }
 
     fn reply_get_status(

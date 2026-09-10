@@ -10,7 +10,10 @@ use crate::twin_runtime::controller::actuation_manager::{
 };
 use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
 use crate::vehicle_state::VehicleContext;
-use crate::{ActuationCommand, CorrelationId, PublishedFsmEvent, VehicleController};
+use crate::{
+    ActuationCommand, CorrelationId, DiagnosticKind, PublishedFsmEvent, VehicleController,
+    VehicleControllerError,
+};
 
 fn blank_twin() -> DigitalTwinCar {
     DigitalTwinCar::new("hazard-actuation", FsmState::Off, VehicleContext::default())
@@ -218,5 +221,108 @@ async fn saturated_transition_channel_retains_every_accepted_duplicate_hazard_re
             .windows(2)
             .all(|pair| pair[1].record_seq == pair[0].record_seq + 1),
         "backpressure must preserve actor record ordering"
+    );
+}
+
+#[tokio::test]
+async fn stalled_transition_consumer_backpressures_actor_until_capacity_is_released() {
+    let (transition_tx, mut transition_rx) = mpsc::channel(2);
+    let options = VehicleControllerRuntimeOptions {
+        transition_tx: Some(transition_tx),
+        ..Default::default()
+    };
+    let (controller, handle) = VehicleController::install_and_start_with_options(
+        "HAZARD-BACKPRESSURE".to_string(),
+        options,
+    )
+    .await
+    .expect("install controller");
+    let _guard = ActorGuard {
+        addr: controller.get_actor_ref().clone(),
+        handle,
+    };
+
+    controller.send_power_on().await.expect("power on");
+    transition_rx.recv().await.expect("power-on record");
+    transition_rx.recv().await.expect("BCM-ready record");
+
+    for _ in 0..3 {
+        controller
+            .submit_fsm_event(FsmEvent::HazardButtonChanged(true))
+            .await
+            .expect("submit duplicate hazard");
+    }
+    tokio::task::yield_now().await;
+
+    assert!(
+        matches!(
+            controller
+                .get_snapshot(Some(Duration::from_millis(50)))
+                .await,
+            Err(VehicleControllerError::Timeout)
+        ),
+        "a detached queue incorrectly lets state advance past bounded record capacity"
+    );
+
+    let first = transition_rx.recv().await.expect("first duplicate record");
+    let snapshot = controller
+        .get_snapshot(Some(Duration::from_millis(250)))
+        .await
+        .expect("actor must resume once bounded capacity is released");
+    assert_eq!(snapshot.as_of_seq(), 5);
+
+    let second = transition_rx.recv().await.expect("second duplicate record");
+    let third = transition_rx.recv().await.expect("third duplicate record");
+    assert_eq!(second.record_seq, first.record_seq + 1);
+    assert_eq!(third.record_seq, second.record_seq + 1);
+}
+
+#[tokio::test]
+async fn closed_transition_channel_reports_error_and_prevents_state_commit() {
+    let (transition_tx, transition_rx) = mpsc::channel(1);
+    drop(transition_rx);
+    let (diagnostic_tx, mut diagnostic_rx) = mpsc::unbounded_channel();
+    let options = VehicleControllerRuntimeOptions {
+        transition_tx: Some(transition_tx),
+        diagnostic_tx: Some(diagnostic_tx),
+        ..Default::default()
+    };
+    let (controller, handle) = VehicleController::install_and_start_with_options(
+        "HAZARD-CLOSED-TRANSITION".to_string(),
+        options,
+    )
+    .await
+    .expect("install controller");
+
+    controller.send_power_on().await.expect("power on accepted");
+
+    let diagnostic = tokio::time::timeout(Duration::from_millis(250), async {
+        loop {
+            let record = diagnostic_rx
+                .recv()
+                .await
+                .expect("diagnostic channel closed");
+            if matches!(record.kind, DiagnosticKind::TransitionSinkClosed) {
+                break record;
+            }
+        }
+    })
+    .await
+    .expect("transition channel closure was not diagnosed");
+    assert!(matches!(
+        diagnostic.kind,
+        DiagnosticKind::TransitionSinkClosed
+    ));
+
+    tokio::time::timeout(Duration::from_millis(250), handle)
+        .await
+        .expect("actor did not stop after commit admission failed")
+        .expect("actor join failed");
+    assert!(
+        controller
+            .get_snapshot(Some(Duration::from_millis(50)))
+            .await
+            .is_err(),
+        "actor must not remain available with unrecorded committed state"
     );
 }
