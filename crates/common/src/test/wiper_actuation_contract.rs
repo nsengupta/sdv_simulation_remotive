@@ -146,6 +146,8 @@ async fn given_rains_started_fsm_event_when_wiper_runs_then_diagnostics_prove_ra
     let (diag_tx, mut diag_rx) = mpsc::unbounded_channel();
     let (actuation_tx, mut actuation_rx) = mpsc::channel(8);
     let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology:
+            crate::twin_runtime::controller::vehicle_controller::AssemblyTopology::Legacy,
         diagnostic_tx: Some(diag_tx),
         actuation_command_tx: Some(actuation_tx),
         ..Default::default()

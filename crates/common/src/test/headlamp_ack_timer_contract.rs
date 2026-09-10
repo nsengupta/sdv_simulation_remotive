@@ -18,6 +18,8 @@ async fn given_actor_driving_in_dark_when_ack_wait_elapses_without_timer_tick_th
  {
     let (transition_tx, mut rx) = mpsc::channel(16);
     let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology:
+            crate::twin_runtime::controller::vehicle_controller::AssemblyTopology::Legacy,
         transition_tx: Some(transition_tx),
         ..VehicleControllerRuntimeOptions::default()
     };
@@ -89,6 +91,8 @@ async fn given_actor_on_requested_when_ack_before_deadline_then_no_spontaneous_i
     let (transition_tx, mut rx) = mpsc::channel(16);
     let (actuation_tx, mut actuation_rx) = mpsc::channel(8);
     let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology:
+            crate::twin_runtime::controller::vehicle_controller::AssemblyTopology::Legacy,
         transition_tx: Some(transition_tx),
         actuation_command_tx: Some(actuation_tx),
         ..VehicleControllerRuntimeOptions::default()

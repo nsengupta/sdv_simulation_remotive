@@ -123,6 +123,8 @@ async fn given_actor_driving_in_dark_when_ack_wait_elapses_then_two_ledger_rows_
  {
     let (transition_tx, mut rx) = mpsc::channel(16);
     let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology:
+            crate::twin_runtime::controller::vehicle_controller::AssemblyTopology::Legacy,
         transition_tx: Some(transition_tx),
         ..VehicleControllerRuntimeOptions::default()
     };

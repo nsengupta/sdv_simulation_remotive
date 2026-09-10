@@ -6,7 +6,7 @@ use crate::digital_twin::DigitalTwinCar;
 use crate::fsm::{DomainAction, FsmEvent, FsmState};
 use crate::test::{ActorGuard, power_on_to_idle};
 use crate::twin_runtime::controller::actuation_manager::{
-    ActuationManager, DefaultActuationManager,
+    ActuationError, ActuationManager, DefaultActuationManager,
 };
 use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
 use crate::vehicle_state::VehicleContext;
@@ -44,6 +44,29 @@ async fn set_turn_lights_maps_to_one_atomic_command_with_scoped_correlation() {
             left_on: true,
             right_on: false,
         })
+    );
+}
+
+#[tokio::test]
+async fn closed_actuation_command_channel_is_reported_as_an_actuation_error() {
+    let (tx, rx) = mpsc::channel(1);
+    drop(rx);
+    let manager = DefaultActuationManager::with_command_channel("closed-channel".into(), 7, tx);
+
+    let error = manager
+        .execute(
+            &DomainAction::SetTurnLights {
+                left_on: true,
+                right_on: true,
+            },
+            &blank_twin(),
+        )
+        .await
+        .expect_err("closed command channel must not be reported as success");
+
+    assert_eq!(
+        error,
+        ActuationError::CommandChannelClosed("set_turn_lights")
     );
 }
 
@@ -146,4 +169,54 @@ async fn changed_hazard_commands_are_deduplicated_without_consuming_correlation_
             right_on: false,
         }
     ));
+}
+
+#[tokio::test]
+async fn saturated_transition_channel_retains_every_accepted_duplicate_hazard_record() {
+    const DUPLICATES: usize = 32;
+    let (transition_tx, mut transition_rx) = mpsc::channel(2);
+    let options = VehicleControllerRuntimeOptions {
+        transition_tx: Some(transition_tx),
+        ..Default::default()
+    };
+    let (controller, handle) =
+        VehicleController::install_and_start_with_options("HAZARD-SATURATION".to_string(), options)
+            .await
+            .expect("install controller");
+    let _guard = ActorGuard {
+        addr: controller.get_actor_ref().clone(),
+        handle,
+    };
+
+    controller.send_power_on().await.expect("power on");
+    transition_rx.recv().await.expect("power-on record");
+    transition_rx.recv().await.expect("BCM-ready record");
+
+    for _ in 0..DUPLICATES {
+        controller
+            .submit_fsm_event(FsmEvent::HazardButtonChanged(true))
+            .await
+            .expect("duplicate hazard accepted");
+    }
+
+    let mut records = Vec::with_capacity(DUPLICATES);
+    for _ in 0..DUPLICATES {
+        records.push(
+            tokio::time::timeout(Duration::from_millis(500), transition_rx.recv())
+                .await
+                .expect("accepted duplicate record was lost under saturation")
+                .expect("transition channel closed"),
+        );
+    }
+    assert!(
+        records
+            .iter()
+            .all(|record| record.event == PublishedFsmEvent::HazardButtonChanged(true))
+    );
+    assert!(
+        records
+            .windows(2)
+            .all(|pair| pair[1].record_seq == pair[0].record_seq + 1),
+        "backpressure must preserve actor record ordering"
+    );
 }

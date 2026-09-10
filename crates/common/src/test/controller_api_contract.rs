@@ -21,7 +21,6 @@ async fn given_twin_ingress_when_submitted_then_controller_drives_actor_state() 
 
     // bridge PreparingToStart → Idle before driving.
     power_on_to_idle(&controller).await;
-    crate::test::submit_daylight_ambient(&controller).await;
     controller
         .submit_twin_ingress(TwinIngressEvent::Telemetry(crate::VssSignal::EngineRpm(
             1500,

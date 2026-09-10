@@ -7,7 +7,7 @@
 // --- Controller (composition root / single doorway) ---
 
 pub use crate::twin_runtime::controller::{
-    ActuationCommand, CorrelationId, VehicleController, VehicleControllerError,
+    ActuationCommand, AssemblyTopology, CorrelationId, VehicleController, VehicleControllerError,
     VehicleControllerRuntimeOptions,
 };
 

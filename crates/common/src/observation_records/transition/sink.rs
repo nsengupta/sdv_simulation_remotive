@@ -6,35 +6,49 @@
 //! in sink implementations / receivers, not in the actor.
 
 use super::PublishedTransitionRecord;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransitionSinkError {
-    Full,
     Closed,
 }
 
 pub trait TransitionRecordSink: Send + Sync {
-    fn try_emit(&self, record: PublishedTransitionRecord) -> Result<(), TransitionSinkError>;
+    fn emit(&self, record: PublishedTransitionRecord) -> Result<(), TransitionSinkError>;
 }
 
 #[derive(Clone)]
 pub struct TokioMpscTransitionRecordSink {
-    tx: mpsc::Sender<PublishedTransitionRecord>,
+    tx: mpsc::UnboundedSender<PublishedTransitionRecord>,
+    closed: Arc<AtomicBool>,
 }
 
 impl TokioMpscTransitionRecordSink {
-    pub fn new(tx: mpsc::Sender<PublishedTransitionRecord>) -> Self {
-        Self { tx }
+    pub fn new(downstream: mpsc::Sender<PublishedTransitionRecord>) -> Self {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let closed = Arc::new(AtomicBool::new(false));
+        let closed_by_forwarder = Arc::clone(&closed);
+        tokio::spawn(async move {
+            while let Some(record) = rx.recv().await {
+                if downstream.send(record).await.is_err() {
+                    closed_by_forwarder.store(true, Ordering::Release);
+                    break;
+                }
+            }
+        });
+        Self { tx, closed }
     }
 }
 
 impl TransitionRecordSink for TokioMpscTransitionRecordSink {
-    fn try_emit(&self, record: PublishedTransitionRecord) -> Result<(), TransitionSinkError> {
-        match self.tx.try_send(record) {
-            Ok(()) => Ok(()),
-            Err(mpsc::error::TrySendError::Full(_)) => Err(TransitionSinkError::Full),
-            Err(mpsc::error::TrySendError::Closed(_)) => Err(TransitionSinkError::Closed),
+    fn emit(&self, record: PublishedTransitionRecord) -> Result<(), TransitionSinkError> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(TransitionSinkError::Closed);
         }
+        self.tx
+            .send(record)
+            .map_err(|_| TransitionSinkError::Closed)
     }
 }

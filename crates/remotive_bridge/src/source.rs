@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use emulator::models::{PhysicalWorldModelConfig, RpmModel};
 use remotivelabs_broker::{
     Connection,
-    generated::base::{ClientId, NameSpace, SignalId, SignalIds, Signals, SubscriberConfig},
+    generated::base::{
+        ClientId, NameSpace, Signal, SignalId, SignalIds, Signals, SubscriberConfig,
+    },
 };
 use std::collections::VecDeque;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -42,6 +44,68 @@ pub enum HazardRead {
     End,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct HazardRejectCounters {
+    wrong_identity: u64,
+    invalid_payload: u64,
+}
+
+impl HazardRejectCounters {
+    pub fn wrong_identity(&self) -> u64 {
+        self.wrong_identity
+    }
+
+    pub fn invalid_payload(&self) -> u64 {
+        self.invalid_payload
+    }
+
+    fn reject_identity(&mut self) {
+        self.wrong_identity = self.wrong_identity.saturating_add(1);
+        report_rejection_count("wrong signal identity", self.wrong_identity);
+    }
+
+    fn reject_payload(&mut self) {
+        self.invalid_payload = self.invalid_payload.saturating_add(1);
+        report_rejection_count("invalid hazard payload", self.invalid_payload);
+    }
+}
+
+fn report_rejection_count(reason: &str, count: u64) {
+    if count.is_power_of_two() {
+        eprintln!("[remotive_bridge] rejected {reason}; count={count}");
+    }
+}
+
+fn has_hazard_identity(signal: &Signal) -> bool {
+    signal.id.as_ref().is_some_and(|id| {
+        id.name == HAZARD_NAME
+            && id
+                .namespace
+                .as_ref()
+                .is_some_and(|namespace| namespace.name == HAZARD_NAMESPACE)
+    })
+}
+
+pub fn decode_hazard_signals(signals: &Signals, rejected: &mut HazardRejectCounters) -> Vec<bool> {
+    signals
+        .signal
+        .iter()
+        .filter_map(|signal| {
+            if !has_hazard_identity(signal) {
+                rejected.reject_identity();
+                return None;
+            }
+            match decode_hazard(signal.payload.as_ref()) {
+                Some(value) => Some(value),
+                None => {
+                    rejected.reject_payload();
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
 #[async_trait]
 pub trait HazardSource {
     async fn next_hazard(&mut self) -> Result<HazardRead>;
@@ -67,6 +131,7 @@ pub trait ShutdownSource {
 pub struct RemotiveHazardSource {
     stream: Streaming<Signals>,
     pending: VecDeque<bool>,
+    rejected: HazardRejectCounters,
 }
 
 impl RemotiveHazardSource {
@@ -85,6 +150,7 @@ impl RemotiveHazardSource {
         Ok(Self {
             stream,
             pending: VecDeque::new(),
+            rejected: HazardRejectCounters::default(),
         })
     }
 }
@@ -112,12 +178,8 @@ impl HazardSource for RemotiveHazardSource {
             let Some(signals) = self.stream.message().await.context("broker stream error")? else {
                 return Ok(HazardRead::End);
             };
-            self.pending.extend(
-                signals
-                    .signal
-                    .iter()
-                    .filter_map(|signal| decode_hazard(signal.payload.as_ref())),
-            );
+            self.pending
+                .extend(decode_hazard_signals(&signals, &mut self.rejected));
         }
     }
 }

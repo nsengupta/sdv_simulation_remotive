@@ -13,8 +13,8 @@ use std::time::Duration;
 
 use common::digital_twin::TwinMessage;
 use common::facade::{
-    FRONT_HEADLAMP_ON_ACK_WAIT, HeadlampState, TwinIngressEvent, VehicleController,
-    VehicleControllerRuntimeOptions,
+    AssemblyTopology, FRONT_HEADLAMP_ON_ACK_WAIT, HeadlampState, TwinIngressEvent,
+    VehicleController, VehicleControllerRuntimeOptions,
 };
 use common::fsm::{FsmEvent, FsmState};
 
@@ -66,7 +66,10 @@ async fn wait_headlamp_state(
 
 #[tokio::test]
 async fn headlamp_ack_path() {
-    let runtime_options = VehicleControllerRuntimeOptions::default();
+    let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::Legacy,
+        ..Default::default()
+    };
     let (controller, _join) = VehicleController::install_and_start_with_options(
         "E2E-FRONT-HEADLAMP-ACK-01".to_string(),
         runtime_options,
@@ -95,7 +98,10 @@ async fn headlamp_ack_path() {
 
 #[tokio::test]
 async fn headlamp_nack_path() {
-    let runtime_options = VehicleControllerRuntimeOptions::default();
+    let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::Legacy,
+        ..Default::default()
+    };
     let (controller, _join) = VehicleController::install_and_start_with_options(
         "E2E-FRONT-HEADLAMP-NACK-01".to_string(),
         runtime_options,
@@ -129,7 +135,10 @@ async fn headlamp_nack_path() {
 
 #[tokio::test]
 async fn headlamp_no_response_timeout_path() {
-    let runtime_options = VehicleControllerRuntimeOptions::default();
+    let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::Legacy,
+        ..Default::default()
+    };
     let (controller, _join) = VehicleController::install_and_start_with_options(
         "E2E-FRONT-HEADLAMP-TIMEOUT-01".to_string(),
         runtime_options,

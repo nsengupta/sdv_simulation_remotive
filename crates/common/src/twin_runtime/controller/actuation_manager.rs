@@ -8,6 +8,7 @@ use crate::twin_runtime::controller::{ActuationCommand, CorrelationId};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActuationError {
     UnsupportedAction(&'static str),
+    CommandChannelClosed(&'static str),
 }
 
 #[async_trait]
@@ -104,9 +105,9 @@ impl ActuationManager for DefaultActuationManager {
                 if let (Some(tx), Some(correlation_id)) =
                     (&self.actuation_command_tx, self.next_correlation_id())
                 {
-                    let _ = tx
-                        .send(ActuationCommand::SwitchFrontHeadlampOn { correlation_id })
-                        .await;
+                    tx.send(ActuationCommand::SwitchFrontHeadlampOn { correlation_id })
+                        .await
+                        .map_err(|_| ActuationError::CommandChannelClosed("front_headlamp_on"))?;
                 }
             }
             DomainAction::RequestFrontHeadlampOff => {
@@ -115,32 +116,36 @@ impl ActuationManager for DefaultActuationManager {
                 if let (Some(tx), Some(correlation_id)) =
                     (&self.actuation_command_tx, self.next_correlation_id())
                 {
-                    let _ = tx
-                        .send(ActuationCommand::SwitchFrontHeadlampOff { correlation_id })
-                        .await;
+                    tx.send(ActuationCommand::SwitchFrontHeadlampOff { correlation_id })
+                        .await
+                        .map_err(|_| ActuationError::CommandChannelClosed("front_headlamp_off"))?;
                 }
             }
             DomainAction::RequestWiperStart => {
                 if let Some(tx) = &self.actuation_command_tx {
-                    let _ = tx.send(ActuationCommand::StartWiper).await;
+                    tx.send(ActuationCommand::StartWiper)
+                        .await
+                        .map_err(|_| ActuationError::CommandChannelClosed("wiper_start"))?;
                 }
             }
             DomainAction::RequestWiperStop => {
                 if let Some(tx) = &self.actuation_command_tx {
-                    let _ = tx.send(ActuationCommand::StopWiper).await;
+                    tx.send(ActuationCommand::StopWiper)
+                        .await
+                        .map_err(|_| ActuationError::CommandChannelClosed("wiper_stop"))?;
                 }
             }
             DomainAction::SetTurnLights { left_on, right_on } => {
                 if let (Some(tx), Some(correlation_id)) =
                     (&self.actuation_command_tx, self.next_correlation_id())
                 {
-                    let _ = tx
-                        .send(ActuationCommand::SetTurnLights {
-                            correlation_id,
-                            left_on: *left_on,
-                            right_on: *right_on,
-                        })
-                        .await;
+                    tx.send(ActuationCommand::SetTurnLights {
+                        correlation_id,
+                        left_on: *left_on,
+                        right_on: *right_on,
+                    })
+                    .await
+                    .map_err(|_| ActuationError::CommandChannelClosed("set_turn_lights"))?;
                 }
             }
             // StartAssemblies / StopAssemblies are intercepted by `apply_committed_quiescence`

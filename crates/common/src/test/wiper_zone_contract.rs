@@ -16,7 +16,9 @@ use crate::VehicleController;
 use crate::digital_twin::{TwinMessage, ZoneMessage, ZoneReply};
 use crate::fsm::{AssemblyId, FsmEvent, FsmState};
 use crate::test::ActorGuard;
-use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
+use crate::twin_runtime::controller::vehicle_controller::{
+    AssemblyTopology, VehicleControllerRuntimeOptions,
+};
 use crate::twin_runtime::zone_turn::zone_message_for_event;
 use crate::vehicle_state::{WiperContext, WiperMessage, WiperState, WiperZoneReply};
 
@@ -78,8 +80,12 @@ fn inject_wiper_zone_ready(controller: &VehicleController, turn_id: u64) {
 }
 
 async fn spawn_non_silent(identity: &str) -> (VehicleController, ActorGuard<TwinMessage>) {
+    let options = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::Legacy,
+        ..Default::default()
+    };
     let (controller, handle) =
-        VehicleController::install_and_start_with_options(identity.to_string(), Default::default())
+        VehicleController::install_and_start_with_options(identity.to_string(), options)
             .await
             .expect("spawn non-silent");
     let guard = ActorGuard {
@@ -98,6 +104,7 @@ async fn spawn_silent_wiper(
 ) {
     let (tx, rx) = tokio::sync::mpsc::channel(32);
     let opts = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::Legacy,
         transition_tx: Some(tx),
         test_silent_wiper: true,
         ..Default::default()
@@ -122,6 +129,7 @@ async fn spawn_silent_both(
 ) {
     let (tx, rx) = tokio::sync::mpsc::channel(32);
     let opts = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::Legacy,
         transition_tx: Some(tx),
         test_silent_headlamp: true,
         test_silent_wiper: true,

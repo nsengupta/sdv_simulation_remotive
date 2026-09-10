@@ -1,0 +1,85 @@
+{
+  "schema_version": 3,
+  "run_id": "00000000-0000-4000-8000-000000000001",
+  "vehicle_identity": "test-vehicle",
+  "recorded_at": {
+    "unix_seconds": 1784260802,
+    "nanosecond": 0
+  },
+  "payload": {
+    "session_started_at": {
+      "unix_seconds": 1784260800,
+      "nanosecond": 0
+    },
+    "record_seq": 7,
+    "event": {
+      "type": "update_rpm",
+      "rpm": 1500
+    },
+    "old_state": {
+      "type": "driving"
+    },
+    "next_state": {
+      "type": "driving"
+    },
+    "old_ctx": {
+      "powertrain": {
+        "wheel_rpm": {
+          "front_left": 1,
+          "front_right": 2,
+          "rear_left": 3,
+          "rear_right": 4
+        },
+        "speed_kph": 42
+      },
+      "health": {
+        "fuel_level_pct": 75,
+        "oil_pressure_kpa": 90,
+        "tyre_pressure_ok": true
+      },
+      "visibility": {
+        "ambient_lux": 20
+      },
+      "weather": {
+        "raining": false
+      },
+      "headlamp": {
+        "state": "ready",
+        "ack_pending_since": null
+      },
+      "wiper": {
+        "state": "off"
+      }
+    },
+    "current_ctx": {
+      "powertrain": {
+        "wheel_rpm": {
+          "front_left": 1,
+          "front_right": 2,
+          "rear_left": 3,
+          "rear_right": 4
+        },
+        "speed_kph": 42
+      },
+      "health": {
+        "fuel_level_pct": 75,
+        "oil_pressure_kpa": 90,
+        "tyre_pressure_ok": true
+      },
+      "visibility": {
+        "ambient_lux": 20
+      },
+      "weather": {
+        "raining": false
+      },
+      "headlamp": {
+        "state": "ready",
+        "ack_pending_since": null
+      },
+      "wiper": {
+        "state": "off"
+      }
+    },
+    "actions": []
+  }
+}

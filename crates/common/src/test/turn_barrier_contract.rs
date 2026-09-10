@@ -34,7 +34,9 @@ use crate::digital_twin::{TwinMessage, ZoneReply};
 use crate::fsm::{AssemblyId, FsmEvent, FsmState, HeadlampState};
 use crate::observation_records::transition::{PublishedDomainAction, PublishedTransitionRecord};
 use crate::test::ActorGuard;
-use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
+use crate::twin_runtime::controller::vehicle_controller::{
+    AssemblyTopology, VehicleControllerRuntimeOptions,
+};
 use crate::vehicle_physics::LUX_ON_THRESHOLD;
 use crate::vehicle_state::{HeadlampContext, HeadlampOutcome, HeadlampZoneReply};
 
@@ -135,6 +137,7 @@ async fn spawn_silent(
 ) {
     let (tx, rx) = mpsc::channel(32);
     let opts = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::Legacy,
         transition_tx: Some(tx),
         test_silent_headlamp: true, // suppress real headlamp replies; we inject manually
         ..Default::default()

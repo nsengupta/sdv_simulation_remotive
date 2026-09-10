@@ -6,7 +6,9 @@ use crate::test::{
     ActorGuard, expect_actuation_command, inject_matching_ack, inject_matching_nack,
     power_on_to_idle,
 };
-use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
+use crate::twin_runtime::controller::vehicle_controller::{
+    AssemblyTopology, VehicleControllerRuntimeOptions,
+};
 use crate::vehicle_state::VehicleContext;
 use crate::{ActuationCommand, TwinIngressEvent, VehicleController, VssSignal};
 use crate::{PublishedFsmEvent, PublishedFsmState};
@@ -15,6 +17,83 @@ use tokio::sync::mpsc;
 
 /// Timeout for actor call in contract tests.
 const DEFAULT_ACTOR_TIMEOUT: Duration = Duration::from_millis(250);
+
+#[tokio::test]
+async fn default_phase_i_topology_ignores_legacy_headlamp_and_wiper_ingress() {
+    let (transition_tx, mut transition_rx) = mpsc::channel(8);
+    let options = VehicleControllerRuntimeOptions {
+        transition_tx: Some(transition_tx),
+        ..Default::default()
+    };
+    let (controller, handle) =
+        VehicleController::install_and_start_with_options("PHASE-I-TOPOLOGY".to_string(), options)
+            .await
+            .expect("install twin");
+    let _guard = ActorGuard {
+        addr: controller.get_actor_ref().clone(),
+        handle,
+    };
+
+    power_on_to_idle(&controller).await;
+    transition_rx.recv().await.expect("power-on record");
+    transition_rx.recv().await.expect("BCM-ready record");
+
+    controller
+        .submit_fsm_event(FsmEvent::UpdateAmbientLux(7))
+        .await
+        .expect("submit legacy headlamp ingress");
+    controller
+        .submit_fsm_event(FsmEvent::RainsStarted)
+        .await
+        .expect("submit legacy wiper ingress");
+
+    assert!(
+        tokio::time::timeout(DEFAULT_ACTOR_TIMEOUT, transition_rx.recv())
+            .await
+            .is_err(),
+        "default Phase I topology must not route legacy assembly ingress"
+    );
+    let snapshot = controller
+        .get_snapshot(Some(DEFAULT_ACTOR_TIMEOUT))
+        .await
+        .expect("snapshot");
+    assert_eq!(
+        snapshot.context().visibility.ambient_lux,
+        VehicleContext::default().visibility.ambient_lux
+    );
+    assert!(!snapshot.context().weather.raining);
+}
+
+#[tokio::test]
+async fn explicit_legacy_topology_routes_headlamp_and_wiper_ingress() {
+    let (transition_tx, mut transition_rx) = mpsc::channel(8);
+    let options = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::Legacy,
+        transition_tx: Some(transition_tx),
+        ..Default::default()
+    };
+    let (controller, handle) =
+        VehicleController::install_and_start_with_options("LEGACY-TOPOLOGY".to_string(), options)
+            .await
+            .expect("install twin");
+    let _guard = ActorGuard {
+        addr: controller.get_actor_ref().clone(),
+        handle,
+    };
+
+    power_on_to_idle(&controller).await;
+    transition_rx.recv().await.expect("power-on record");
+    transition_rx.recv().await.expect("BCM-ready record");
+    controller
+        .submit_fsm_event(FsmEvent::RainsStarted)
+        .await
+        .expect("submit legacy wiper ingress");
+    let record = tokio::time::timeout(DEFAULT_ACTOR_TIMEOUT, transition_rx.recv())
+        .await
+        .expect("legacy ingress was not routed")
+        .expect("transition channel closed");
+    assert_eq!(record.event, PublishedFsmEvent::RainsStarted);
+}
 
 #[tokio::test]
 async fn off_silently_ignores_rpm_and_lux_without_observable_or_context_changes() {
@@ -110,6 +189,7 @@ async fn scenario_raw_transition_records_are_emitted_in_order() {
     let (tx, mut rx) = mpsc::channel(16);
 
     let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::Legacy,
         transition_tx: Some(tx),
         ..VehicleControllerRuntimeOptions::default()
     };
@@ -258,6 +338,7 @@ async fn scenario_actuation_ack_round_trip_via_helper() {
     // transition — the harness standing in for the future actuation child actor.
     let (actuation_tx, mut actuation_rx) = mpsc::channel(16);
     let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::Legacy,
         actuation_command_tx: Some(actuation_tx),
         ..Default::default()
     };
@@ -306,6 +387,7 @@ async fn scenario_actuation_ack_surfaces_confirmation_on_diagnostic_sink() {
     let (actuation_tx, _actuation_rx) = mpsc::channel(16);
 
     let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::Legacy,
         diagnostic_tx: Some(diag_tx),
         actuation_command_tx: Some(actuation_tx),
         ..VehicleControllerRuntimeOptions::default()
@@ -366,6 +448,7 @@ async fn scenario_actuation_ack_surfaces_confirmation_on_diagnostic_sink() {
 async fn scenario_actuation_nack_round_trip_via_helper() {
     let (actuation_tx, mut actuation_rx) = mpsc::channel(16);
     let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::Legacy,
         actuation_command_tx: Some(actuation_tx),
         ..Default::default()
     };

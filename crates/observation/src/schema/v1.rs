@@ -409,7 +409,7 @@ pub struct WiperContextV1 {
     pub state: WiperStateV1,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SccmContextV1 {
     pub hazard_button_on: bool,
 }
@@ -421,7 +421,13 @@ pub enum BcmStateV1 {
     Ready,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+impl Default for BcmStateV1 {
+    fn default() -> Self {
+        Self::Off
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BcmContextV1 {
     pub state: BcmStateV1,
     pub left_turn_request_on: bool,
@@ -446,7 +452,9 @@ pub struct HeadlampContextV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VehicleContextV1 {
+    #[serde(default)]
     pub sccm: SccmContextV1,
+    #[serde(default)]
     pub bcm: BcmContextV1,
     pub powertrain: PowertrainContextV1,
     pub health: HealthContextV1,

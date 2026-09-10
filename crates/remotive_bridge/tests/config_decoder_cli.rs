@@ -3,10 +3,11 @@ use remotive_bridge::cli::{
 };
 use remotive_bridge::decoder::decode_hazard;
 use remotive_bridge::source::{
-    CLIENT_ID, HAZARD_NAME, HAZARD_NAMESPACE, ProfileRpmSource, RpmSource, subscription_config,
-    subscription_ready_status,
+    CLIENT_ID, HAZARD_NAME, HAZARD_NAMESPACE, HazardRejectCounters, ProfileRpmSource, RpmSource,
+    decode_hazard_signals, subscription_config, subscription_ready_status,
 };
 use remotivelabs_broker::generated::base::signal::Payload;
+use remotivelabs_broker::generated::base::{NameSpace, Signal, SignalId, Signals};
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
@@ -58,6 +59,60 @@ fn decoder_accepts_only_documented_hazard_encodings() {
     for payload in malformed {
         assert_eq!(decode_hazard(payload.as_ref()), None);
     }
+}
+
+fn signal(namespace: Option<&str>, name: &str, payload: Option<Payload>) -> Signal {
+    Signal {
+        id: Some(SignalId {
+            namespace: namespace.map(|name| NameSpace {
+                name: name.to_owned(),
+            }),
+            name: name.to_owned(),
+        }),
+        raw: vec![],
+        timestamp: 0,
+        payload,
+    }
+}
+
+#[test]
+fn broker_batch_decodes_only_exact_hazard_signal_identity() {
+    let batch = Signals {
+        signal: vec![
+            signal(
+                Some(HAZARD_NAMESPACE),
+                HAZARD_NAME,
+                Some(Payload::Integer(1)),
+            ),
+            signal(
+                Some("wrong-namespace"),
+                HAZARD_NAME,
+                Some(Payload::Integer(0)),
+            ),
+            signal(
+                Some(HAZARD_NAMESPACE),
+                "wrong-name",
+                Some(Payload::Integer(0)),
+            ),
+            signal(None, HAZARD_NAME, Some(Payload::Integer(0))),
+            Signal {
+                id: None,
+                raw: vec![],
+                timestamp: 0,
+                payload: Some(Payload::Integer(0)),
+            },
+            signal(
+                Some(HAZARD_NAMESPACE),
+                HAZARD_NAME,
+                Some(Payload::Integer(2)),
+            ),
+        ],
+    };
+    let mut rejected = HazardRejectCounters::default();
+
+    assert_eq!(decode_hazard_signals(&batch, &mut rejected), vec![true]);
+    assert_eq!(rejected.wrong_identity(), 4);
+    assert_eq!(rejected.invalid_payload(), 1);
 }
 
 #[test]

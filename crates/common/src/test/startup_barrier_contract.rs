@@ -188,6 +188,8 @@ async fn given_ingress_immediately_after_power_on_when_startup_unblocks_then_com
  {
     let (transition_tx, mut transition_rx) = mpsc::channel(32);
     let opts = VehicleControllerRuntimeOptions {
+        assembly_topology:
+            crate::twin_runtime::controller::vehicle_controller::AssemblyTopology::Legacy,
         transition_tx: Some(transition_tx),
         test_silent_bcm: true,
         ..Default::default()

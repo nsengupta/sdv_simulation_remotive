@@ -54,6 +54,8 @@ async fn given_low_lux_and_on_ack_when_get_status_then_ledger_headlamp_matches_e
     // headlamp reaches Ready automatically via the startup BecomeOn barrier;
     // `initial_headlamp_ctx` is no longer needed.
     let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology:
+            crate::twin_runtime::controller::vehicle_controller::AssemblyTopology::Legacy,
         transition_tx: Some(transition_tx),
         actuation_command_tx: Some(actuation_tx),
         ..VehicleControllerRuntimeOptions::default()
@@ -134,6 +136,8 @@ async fn given_low_lux_and_on_ack_when_get_status_then_ledger_headlamp_matches_e
 async fn given_power_on_only_when_get_status_then_ledger_headlamp_matches_embed() {
     let (tx, mut rx) = mpsc::channel(8);
     let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology:
+            crate::twin_runtime::controller::vehicle_controller::AssemblyTopology::Legacy,
         transition_tx: Some(tx),
         ..VehicleControllerRuntimeOptions::default()
     };

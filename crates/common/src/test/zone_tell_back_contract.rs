@@ -77,12 +77,15 @@ async fn given_silent_headlamp_when_headlamp_demux_event_then_ledger_records_unr
     use crate::fsm::{FsmEvent, FsmState};
     use crate::test::ActorGuard;
     use crate::twin_runtime::constants::{ZONE_TELL_BACK_ATTEMPT_COUNT, ZONE_TELL_BACK_WAIT};
-    use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
+    use crate::twin_runtime::controller::vehicle_controller::{
+        AssemblyTopology, VehicleControllerRuntimeOptions,
+    };
     use crate::{PublishedDomainAction, PublishedFsmEvent, VehicleController};
     use tokio::sync::mpsc;
 
     let (transition_tx, mut rx) = mpsc::channel(16);
     let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::Legacy,
         transition_tx: Some(transition_tx),
         test_silent_headlamp: true,
         ..VehicleControllerRuntimeOptions::default()

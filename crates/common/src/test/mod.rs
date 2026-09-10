@@ -134,7 +134,9 @@ impl<T: ractor::Message> Drop for ActorGuard<T> {
 
 use crate::digital_twin::TwinMessage;
 use crate::fsm::{FsmEvent, FsmState};
-use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
+use crate::twin_runtime::controller::vehicle_controller::{
+    AssemblyTopology, VehicleControllerRuntimeOptions,
+};
 use crate::vehicle_physics::LUX_ON_THRESHOLD;
 use crate::{ActuationCommand, TwinIngressEvent, VehicleController};
 use tokio::sync::mpsc;
@@ -229,6 +231,7 @@ pub async fn install_with_actuation(
 ) {
     let (tx, rx) = mpsc::channel(capacity);
     let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::Legacy,
         actuation_command_tx: Some(tx),
         ..Default::default()
     };

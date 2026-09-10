@@ -21,8 +21,9 @@
 use anyhow::Result;
 use common::DiagnosticRecord;
 use common::facade::{
-    ActuationCommand, PublishedTransitionRecord, TwinIngressEvent, VehicleController,
-    VehicleControllerRuntimeOptions, VssSignal, spawn_stdout_diagnostic_observer,
+    ActuationCommand, AssemblyTopology, PublishedTransitionRecord, TwinIngressEvent,
+    VehicleController, VehicleControllerRuntimeOptions, VssSignal,
+    spawn_stdout_diagnostic_observer,
 };
 use socketcan::{CanSocket, Socket};
 use std::future::Future;
@@ -212,6 +213,10 @@ impl TwinRuntimeBuilder {
             mpsc::channel(ACTUATION_COMMAND_CHANNEL_CAPACITY);
 
         let runtime_options = VehicleControllerRuntimeOptions {
+            assembly_topology: match self.actuation_egress_mode {
+                ActuationEgressMode::Null => AssemblyTopology::PhaseI,
+                ActuationEgressMode::LegacyCan => AssemblyTopology::Legacy,
+            },
             actuation_command_tx: Some(actuation_cmd_tx),
             diagnostic_tx: self.diagnostic_tx.clone(),
             transition_tx: self.transition_tx.clone(),
@@ -280,6 +285,7 @@ impl TwinRuntimeBuilder {
             can_interface.clone(),
             headlamp_policy,
             trace_actuation_ingress,
+            actuation_egress_mode,
             can_tx,
         )?;
 
@@ -386,6 +392,7 @@ fn spawn_can_reader_thread(
     can_interface: String,
     front_headlamp_policy: Arc<Mutex<FrontHeadlampPolicy>>,
     trace_actuation_ingress: bool,
+    actuation_egress_mode: ActuationEgressMode,
     tx: mpsc::UnboundedSender<CanIngressEnvelope>,
 ) -> Result<std::thread::JoinHandle<()>> {
     let socket = CanSocket::open(&can_interface)?;
@@ -416,36 +423,38 @@ fn spawn_can_reader_thread(
                     }
                     continue;
                 }
-                if let Some(payload) = decode_payload_from_can_frame(&frame) {
-                    let decision = {
-                        let mut policy = front_headlamp_policy
-                            .lock()
-                            .expect("front-headlamp policy lock");
-                        policy.on_response(payload)
-                    };
-                    match decision {
-                        FrontHeadlampPolicyDecision::Accept {
-                            twin_ingress,
-                            session,
-                            sequence,
-                        } => {
-                            if tx
-                                .send(CanIngressEnvelope::ActuationResponse {
-                                    twin_ingress,
-                                    session,
-                                    sequence,
-                                })
-                                .is_err()
-                            {
-                                break;
+                if actuation_response_ingress_enabled(actuation_egress_mode) {
+                    if let Some(payload) = decode_payload_from_can_frame(&frame) {
+                        let decision = {
+                            let mut policy = front_headlamp_policy
+                                .lock()
+                                .expect("front-headlamp policy lock");
+                            policy.on_response(payload)
+                        };
+                        match decision {
+                            FrontHeadlampPolicyDecision::Accept {
+                                twin_ingress,
+                                session,
+                                sequence,
+                            } => {
+                                if tx
+                                    .send(CanIngressEnvelope::ActuationResponse {
+                                        twin_ingress,
+                                        session,
+                                        sequence,
+                                    })
+                                    .is_err()
+                                {
+                                    break;
+                                }
                             }
-                        }
-                        FrontHeadlampPolicyDecision::Ignore(reason) => {
-                            if trace_actuation_ingress {
-                                eprintln!(
-                                    "[actuation-can-ingress trace ignored]: reason={reason} session={} seq={}",
-                                    payload.session_id, payload.sequence_no
-                                );
+                            FrontHeadlampPolicyDecision::Ignore(reason) => {
+                                if trace_actuation_ingress {
+                                    eprintln!(
+                                        "[actuation-can-ingress trace ignored]: reason={reason} session={} seq={}",
+                                        payload.session_id, payload.sequence_no
+                                    );
+                                }
                             }
                         }
                     }
@@ -453,6 +462,10 @@ fn spawn_can_reader_thread(
             }
         })?;
     Ok(handle)
+}
+
+fn actuation_response_ingress_enabled(mode: ActuationEgressMode) -> bool {
+    mode == ActuationEgressMode::LegacyCan
 }
 
 /// Fan-out: one actuation channel -> headlamp publisher + wiper publisher.
@@ -635,6 +648,16 @@ mod tests {
             builder.actuation_egress_mode(),
             ActuationEgressMode::LegacyCan
         );
+    }
+
+    #[test]
+    fn actuation_response_decoding_is_enabled_only_for_legacy_can() {
+        assert!(!actuation_response_ingress_enabled(
+            ActuationEgressMode::Null
+        ));
+        assert!(actuation_response_ingress_enabled(
+            ActuationEgressMode::LegacyCan
+        ));
     }
 
     #[tokio::test]

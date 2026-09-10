@@ -23,8 +23,19 @@ pub enum VehicleControllerError {
     ReplyDropped,
 }
 
+/// Selects the actor topology installed by the controller.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AssemblyTopology {
+    /// Phase I production topology: BCM is the only spawned and routed assembly.
+    #[default]
+    PhaseI,
+    /// Explicit compatibility topology for legacy headlamp/wiper applications and tests.
+    Legacy,
+}
+
 #[derive(Debug, Clone)]
 pub struct VehicleControllerRuntimeOptions {
+    pub assembly_topology: AssemblyTopology,
     pub log_timer_tick: bool,
     pub actuation_command_tx: Option<tokio::sync::mpsc::Sender<ActuationCommand>>,
     pub diagnostic_tx: Option<
@@ -47,6 +58,7 @@ pub struct VehicleControllerRuntimeOptions {
 impl Default for VehicleControllerRuntimeOptions {
     fn default() -> Self {
         Self {
+            assembly_topology: AssemblyTopology::PhaseI,
             log_timer_tick: false,
             actuation_command_tx: None,
             diagnostic_tx: None,

@@ -5,6 +5,21 @@ use std::path::{Path, PathBuf};
 use observation::{ObservationError, RunReader, RunWriter};
 use support::{RUN_ID, VEHICLE, fixed_run_metadata, sample_diagnostic, sample_ledger};
 
+#[test]
+fn pre_phase_i_v3_ledger_defaults_missing_sccm_and_bcm_contexts() {
+    let fixture = include_str!("fixtures/pre_phase_i_v3_ledger.json");
+    let envelope: observation::schema::v1::StreamEnvelopeV1<
+        observation::schema::v1::LedgerPayloadV1,
+    > = serde_json::from_str(fixture).expect("pre-Phase-I schema-v3 ledger must deserialize");
+
+    for context in [&envelope.payload.old_ctx, &envelope.payload.current_ctx] {
+        assert!(!context.sccm.hazard_button_on);
+        assert_eq!(context.bcm.state, observation::schema::v1::BcmStateV1::Off);
+        assert!(!context.bcm.left_turn_request_on);
+        assert!(!context.bcm.right_turn_request_on);
+    }
+}
+
 /// Write a fresh, valid fixture (two diagnostics, one ledger row) under `parent` and return the
 /// created run directory. Each test starts from this valid baseline and independently mutates
 /// exactly one aspect of it, per the Task 4 compatibility matrix.

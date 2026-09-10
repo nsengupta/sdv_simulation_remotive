@@ -3,7 +3,10 @@
 use crate::digital_twin::TwinMessage;
 use crate::fsm::{FsmEvent, FsmState};
 use crate::test::{ActorGuard, power_on_to_idle};
-use crate::twin_runtime::controller::virtual_car_actor::VirtualCarActor;
+use crate::twin_runtime::controller::vehicle_controller::{
+    AssemblyTopology, VehicleControllerRuntimeOptions,
+};
+use crate::twin_runtime::controller::virtual_car_actor::{VirtualCarActor, VirtualCarActorArgs};
 use ractor::Actor;
 use ractor::concurrency::Duration;
 
@@ -71,7 +74,14 @@ async fn scenario_cold_start_get_status_shows_off() {
 
 #[tokio::test]
 async fn scenario_power_on_then_drive_rpm_enters_driving() {
-    let (actor, handle) = Actor::spawn(None, VirtualCarActor::default(), "WARMUP".into())
+    let args = VirtualCarActorArgs {
+        identity: "WARMUP".into(),
+        runtime_options: VehicleControllerRuntimeOptions {
+            assembly_topology: AssemblyTopology::Legacy,
+            ..Default::default()
+        },
+    };
+    let (actor, handle) = Actor::spawn(None, VirtualCarActor::default(), args)
         .await
         .unwrap();
     let _guard = ActorGuard {
@@ -131,7 +141,14 @@ async fn scenario_rpm_input_ignored_when_ignition_off() {
 
 #[tokio::test]
 async fn scenario_redline_rpm_from_driving_enters_warning() {
-    let (actor, handle) = Actor::spawn(None, VirtualCarActor::default(), "OVERSPEED".into())
+    let args = VirtualCarActorArgs {
+        identity: "OVERSPEED".into(),
+        runtime_options: VehicleControllerRuntimeOptions {
+            assembly_topology: AssemblyTopology::Legacy,
+            ..Default::default()
+        },
+    };
+    let (actor, handle) = Actor::spawn(None, VirtualCarActor::default(), args)
         .await
         .unwrap();
     let _guard = ActorGuard {

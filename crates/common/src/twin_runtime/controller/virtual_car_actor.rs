@@ -36,8 +36,7 @@ use crate::fsm::{
 use crate::observation_records::diagnostic::sink::{
     DiagnosticSink, TokioMpscDiagnosticSink, diag_actuation_failure, diag_boot,
     diag_headlamp_actuation_unconfirmed, diag_rain_changed, diag_timer_tick,
-    diag_transition_sink_closed, diag_transition_sink_full, diag_warning,
-    diag_wiper_motion_changed,
+    diag_transition_sink_closed, diag_warning, diag_wiper_motion_changed,
 };
 use crate::observation_records::transition::sink::{
     TokioMpscTransitionRecordSink, TransitionRecordSink, TransitionSinkError,
@@ -46,6 +45,7 @@ use crate::observation_records::transition::{PublishedTransitionRecord, SessionC
 use crate::twin_runtime::ZoneReplies;
 use crate::twin_runtime::bcm_actor::{BcmActor, BcmActorMsg, BcmActorState, tell_bcm_zone};
 use crate::twin_runtime::constants::ZONE_TELL_BACK_WAIT;
+use crate::twin_runtime::controller::AssemblyTopology;
 use crate::twin_runtime::controller::actuation_manager::{
     ActuationManager, DefaultActuationManager,
 };
@@ -97,8 +97,8 @@ impl From<&str> for VirtualCarActorArgs {
 pub struct VirtualCarRuntimeState {
     twin_car: DigitalTwinCar,
     bcm_actor: ActorRef<BcmActorMsg>,
-    headlamp_actor: ActorRef<HeadlampActorMsg>,
-    wiper_actor: ActorRef<WiperActorMsg>,
+    headlamp_actor: Option<ActorRef<HeadlampActorMsg>>,
+    wiper_actor: Option<ActorRef<WiperActorMsg>>,
     /// Stable self-reference used to arm timers and send `ZoneTellBackTimeout` messages.
     /// Captured in `pre_start` via `myself.clone`; idiomatic actor self-ref pattern.
     self_ref: ActorRef<TwinMessage>,
@@ -181,22 +181,27 @@ impl Actor for VirtualCarActor {
                 Arc::new(DefaultActuationManager::default())
             };
 
-        let (headlamp_actor, _) = ractor::spawn::<HeadlampActor>(HeadlampActorState::new(
-            crate::vehicle_state::HeadlampContext {
-                state: crate::vehicle_state::HeadlampState::Ready,
-                ack_pending_since: None,
-            },
-            args.runtime_options.test_silent_headlamp,
-        ))
-        .await?;
-
-        let (wiper_actor, _) = ractor::spawn::<WiperActor>(WiperActorState::new(
-            crate::vehicle_state::WiperContext {
-                state: WiperState::Ready,
-            },
-            args.runtime_options.test_silent_wiper,
-        ))
-        .await?;
+        let (headlamp_actor, wiper_actor) =
+            if args.runtime_options.assembly_topology == AssemblyTopology::Legacy {
+                let (headlamp, _) = ractor::spawn::<HeadlampActor>(HeadlampActorState::new(
+                    crate::vehicle_state::HeadlampContext {
+                        state: crate::vehicle_state::HeadlampState::Ready,
+                        ack_pending_since: None,
+                    },
+                    args.runtime_options.test_silent_headlamp,
+                ))
+                .await?;
+                let (wiper, _) = ractor::spawn::<WiperActor>(WiperActorState::new(
+                    crate::vehicle_state::WiperContext {
+                        state: WiperState::Ready,
+                    },
+                    args.runtime_options.test_silent_wiper,
+                ))
+                .await?;
+                (Some(headlamp), Some(wiper))
+            } else {
+                (None, None)
+            };
 
         let (bcm_actor, _) = ractor::spawn::<BcmActor>(BcmActorState::new(
             Default::default(),
@@ -235,6 +240,19 @@ impl Actor for VirtualCarActor {
 
         match message {
             Fsm(evt_arrived) => {
+                if runtime_state.runtime_options.assembly_topology == AssemblyTopology::PhaseI
+                    && matches!(
+                        evt_arrived,
+                        FsmEvent::UpdateAmbientLux(_)
+                            | FsmEvent::FrontHeadlampOnAck
+                            | FsmEvent::FrontHeadlampOffAck
+                            | FsmEvent::FrontHeadlampActuationIncomplete { .. }
+                            | FsmEvent::RainsStarted
+                            | FsmEvent::RainsStopped
+                    )
+                {
+                    return Ok(());
+                }
                 if matches!(runtime_state.twin_car.current_state(), FsmState::Off)
                     && !matches!(evt_arrived, FsmEvent::PowerOn)
                 {
@@ -300,8 +318,12 @@ impl Actor for VirtualCarActor {
         }
         runtime_state.barrier_queue.clear();
         runtime_state.bcm_actor.stop(None);
-        runtime_state.headlamp_actor.stop(None);
-        runtime_state.wiper_actor.stop(None);
+        if let Some(actor) = &runtime_state.headlamp_actor {
+            actor.stop(None);
+        }
+        if let Some(actor) = &runtime_state.wiper_actor {
+            actor.stop(None);
+        }
         Ok(())
     }
 }
@@ -339,7 +361,11 @@ impl VirtualCarActor {
                 tell_bcm_zone(&runtime_state.bcm_actor, brain, turn_id, tell_attempt, *m)
             }
             ZoneMessage::Headlamp(m) => tell_headlamp_zone(
-                &runtime_state.headlamp_actor,
+                runtime_state.headlamp_actor.as_ref().ok_or_else(|| {
+                    ActorProcessingErr::from(std::io::Error::other(
+                        "headlamp zone unavailable in Phase I topology",
+                    ))
+                })?,
                 brain,
                 turn_id,
                 tell_attempt,
@@ -347,7 +373,11 @@ impl VirtualCarActor {
                 now,
             ),
             ZoneMessage::Wiper(m) => tell_wiper_zone(
-                &runtime_state.wiper_actor,
+                runtime_state.wiper_actor.as_ref().ok_or_else(|| {
+                    ActorProcessingErr::from(std::io::Error::other(
+                        "wiper zone unavailable in Phase I topology",
+                    ))
+                })?,
                 brain,
                 turn_id,
                 tell_attempt,
@@ -633,7 +663,7 @@ impl VirtualCarActor {
         for hop in &quiescent.hops {
             let record_seq = runtime_state.next_record_seq;
             runtime_state.next_record_seq = runtime_state.next_record_seq.saturating_add(1);
-            Self::try_emit_transition_record(
+            Self::emit_transition_record(
                 runtime_state,
                 record_seq,
                 hop.result.transition_record.clone(),
@@ -754,7 +784,7 @@ impl VirtualCarActor {
         Ok(())
     }
 
-    fn try_emit_transition_record(
+    fn emit_transition_record(
         runtime_state: &mut VirtualCarRuntimeState,
         record_seq: u64,
         transition_record: fsm::RawTransitionRecord,
@@ -770,15 +800,9 @@ impl VirtualCarActor {
             &runtime_state.session_clock,
         );
 
-        if let Err(err) = sink.try_emit(published) {
+        if let Err(err) = sink.emit(published) {
             let diag_sink = &runtime_state.diagnostic_sink;
             match err {
-                TransitionSinkError::Full => {
-                    if let Some(sink) = diag_sink {
-                        let _ =
-                            sink.try_emit(diag_transition_sink_full(&runtime_state.session_clock));
-                    }
-                }
                 TransitionSinkError::Closed => {
                     if let Some(sink) = diag_sink {
                         let _ = sink
