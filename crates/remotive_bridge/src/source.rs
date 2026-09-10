@@ -14,6 +14,10 @@ pub const CLIENT_ID: &str = "sdv-remotive-bridge";
 pub const HAZARD_NAMESPACE: &str = "SCCM-DriverCan0";
 pub const HAZARD_NAME: &str = "HazardLightButton.HazardLightButton";
 
+pub fn subscription_ready_status() -> String {
+    format!("[remotive_bridge] connected; subscribed signal={HAZARD_NAMESPACE}:{HAZARD_NAME}")
+}
+
 pub fn subscription_config() -> SubscriberConfig {
     SubscriberConfig {
         client_id: Some(ClientId {
@@ -77,6 +81,7 @@ impl RemotiveHazardSource {
             .await
             .context("establish Remotive hazard subscription")?
             .into_inner();
+        eprintln!("{}", subscription_ready_status());
         Ok(Self {
             stream,
             pending: VecDeque::new(),

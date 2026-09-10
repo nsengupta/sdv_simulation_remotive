@@ -1,8 +1,8 @@
 //! Controller/FSM integration tests for assembly interaction outcomes.
 //!
 //! Scope:
-//! - Uses `VehicleController` at projection boundary.
-//! - Drives `TwinIngressEvent` events directly.
+//! - Uses `VehicleController` at the strict projection boundary for lifecycle and ACK/NACK.
+//! - Drives legacy ambient-light behavior through the direct `TwinMessage::Fsm` test seam.
 //! - Verifies persisted context across all managed assemblies (headlamp, wiper, …).
 //!
 //! Non-scope:

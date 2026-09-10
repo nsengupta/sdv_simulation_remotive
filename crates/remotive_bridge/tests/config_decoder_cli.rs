@@ -4,6 +4,7 @@ use remotive_bridge::cli::{
 use remotive_bridge::decoder::decode_hazard;
 use remotive_bridge::source::{
     CLIENT_ID, HAZARD_NAME, HAZARD_NAMESPACE, ProfileRpmSource, RpmSource, subscription_config,
+    subscription_ready_status,
 };
 use remotivelabs_broker::generated::base::signal::Payload;
 use std::num::NonZeroUsize;
@@ -19,6 +20,15 @@ fn subscription_config_is_exact_and_preserves_duplicates() {
     assert_eq!(ids[0].namespace.as_ref().unwrap().name, HAZARD_NAMESPACE);
     assert!(!config.on_change);
     assert!(!config.initial_empty);
+}
+
+#[test]
+fn subscription_ready_status_proves_connection_and_exact_target() {
+    assert_eq!(
+        subscription_ready_status(),
+        "[remotive_bridge] connected; subscribed signal=\
+SCCM-DriverCan0:HazardLightButton.HazardLightButton"
+    );
 }
 
 #[test]
