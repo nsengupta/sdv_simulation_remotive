@@ -24,13 +24,19 @@ fn format_transition_record(record: &PublishedTransitionRecord, color: bool) -> 
         format!("actions={:?}", record.actions)
     };
     let headlamp = format!("headlamp={:?}", record.current_ctx.headlamp.state);
+    let hazard = format!(
+        "sccm.hazard_button_on={}  bcm.left_turn_request_on={}  bcm.right_turn_request_on={}",
+        record.current_ctx.sccm.hazard_button_on,
+        record.current_ctx.bcm.left_turn_request_on,
+        record.current_ctx.bcm.right_turn_request_on,
+    );
 
     if !color {
-        return format!("{seq}  {event}  {transition}  {actions}  {headlamp}");
+        return format!("{seq}  {event}  {transition}  {actions}  {headlamp}  {hazard}");
     }
 
     format!(
-        "{DIM}{seq}{RESET}  {event_color}{event}{RESET}  {transition}  {action_color}{actions}{RESET}  {DIM}{headlamp}{RESET}",
+        "{DIM}{seq}{RESET}  {event_color}{event}{RESET}  {transition}  {action_color}{actions}{RESET}  {DIM}{headlamp}  {hazard}{RESET}",
         DIM = ansi::DIM,
         RESET = ansi::RESET,
         event_color = event_color(&record.event),
@@ -173,6 +179,22 @@ mod tests {
         assert!(line.contains("UpdateAmbientLux(20)"));
         assert!(line.contains("Idle → Driving"));
         assert!(line.contains("RequestFrontHeadlampOn"));
+    }
+
+    #[test]
+    fn plain_format_includes_hazard_sccm_and_bcm_projection() {
+        let mut record = sample_record();
+        record.event = PublishedFsmEvent::HazardButtonChanged(true);
+        record.current_ctx.sccm.hazard_button_on = true;
+        record.current_ctx.bcm.state = PublishedBcmState::Ready;
+        record.current_ctx.bcm.left_turn_request_on = true;
+        record.current_ctx.bcm.right_turn_request_on = true;
+
+        let line = format_transition_record(&record, false);
+
+        assert!(line.contains("sccm.hazard_button_on=true"));
+        assert!(line.contains("bcm.left_turn_request_on=true"));
+        assert!(line.contains("bcm.right_turn_request_on=true"));
     }
 
     #[test]

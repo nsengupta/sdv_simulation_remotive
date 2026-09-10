@@ -11,10 +11,37 @@
 
 use std::time::Duration;
 
+use common::digital_twin::TwinMessage;
 use common::facade::{
     FRONT_HEADLAMP_ON_ACK_WAIT, HeadlampState, TwinIngressEvent, VehicleController,
-    VehicleControllerRuntimeOptions, VssSignal, WiperState,
+    VehicleControllerRuntimeOptions,
 };
+use common::fsm::{FsmEvent, FsmState};
+
+async fn submit_fsm_event(controller: &VehicleController, event: FsmEvent) {
+    controller
+        .get_actor_ref()
+        .send_message(TwinMessage::Fsm(event))
+        .expect("direct FSM test event");
+    tokio::task::yield_now().await;
+}
+
+async fn wait_fsm_state(controller: &VehicleController, expected: FsmState, timeout: Duration) {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if let Ok(snapshot) = controller
+            .get_snapshot(Some(Duration::from_millis(50)))
+            .await
+            && *snapshot.current_state() == expected
+        {
+            return;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!("timed out after {timeout:?} waiting for FSM {expected:?}");
+        }
+        tokio::task::yield_now().await;
+    }
+}
 
 async fn wait_headlamp_state(
     controller: &VehicleController,
@@ -37,23 +64,6 @@ async fn wait_headlamp_state(
     }
 }
 
-async fn wait_wiper_state(controller: &VehicleController, expected: WiperState, timeout: Duration) {
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        if let Ok(snapshot) = controller
-            .get_snapshot(Some(Duration::from_millis(50)))
-            .await
-            && snapshot.context().wiper.state == expected
-        {
-            return;
-        }
-        if std::time::Instant::now() >= deadline {
-            panic!("timed out after {timeout:?} waiting for wiper {expected:?}");
-        }
-        tokio::task::yield_now().await;
-    }
-}
-
 #[tokio::test]
 async fn headlamp_ack_path() {
     let runtime_options = VehicleControllerRuntimeOptions::default();
@@ -65,18 +75,10 @@ async fn headlamp_ack_path() {
     .expect("controller start");
 
     controller.send_power_on().await.expect("power on");
-    // Both twinlets must complete startup lifecycle before sending user events.
-    wait_headlamp_state(
-        &controller,
-        HeadlampState::Ready,
-        Duration::from_millis(500),
-    )
-    .await;
-    wait_wiper_state(&controller, WiperState::Ready, Duration::from_millis(500)).await;
-    controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::AmbientLux(20)))
-        .await
-        .expect("low lux event");
+    wait_fsm_state(&controller, FsmState::Idle, Duration::from_millis(500)).await;
+    // Phase I startup is BCM-only. The compatibility headlamp actor starts Ready internally
+    // and projects its state into the parent context when this first user event resolves.
+    submit_fsm_event(&controller, FsmEvent::UpdateAmbientLux(20)).await;
     controller
         .submit_twin_ingress(TwinIngressEvent::FrontHeadlampCommandConfirmed { on_command: true })
         .await
@@ -102,18 +104,9 @@ async fn headlamp_nack_path() {
     .expect("controller start");
 
     controller.send_power_on().await.expect("power on");
-    // Both twinlets must complete startup lifecycle before sending user events.
-    wait_headlamp_state(
-        &controller,
-        HeadlampState::Ready,
-        Duration::from_millis(500),
-    )
-    .await;
-    wait_wiper_state(&controller, WiperState::Ready, Duration::from_millis(500)).await;
-    controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::AmbientLux(20)))
-        .await
-        .expect("low lux event");
+    wait_fsm_state(&controller, FsmState::Idle, Duration::from_millis(500)).await;
+    // Phase I startup is BCM-only; the first headlamp event projects compatibility state.
+    submit_fsm_event(&controller, FsmEvent::UpdateAmbientLux(20)).await;
     controller
         .submit_twin_ingress(TwinIngressEvent::FrontHeadlampCommandRejected { on_command: true })
         .await
@@ -145,20 +138,9 @@ async fn headlamp_no_response_timeout_path() {
     .expect("controller start");
 
     controller.send_power_on().await.expect("power on");
-    // Both twinlets must complete startup lifecycle (FSM → Idle) before sending user events.
-    // AmbientLux during PreparingToStart is a PassthroughBarrier; the headlamp would never
-    // reach OnRequested and the ACK timer would never fire.
-    wait_headlamp_state(
-        &controller,
-        HeadlampState::Ready,
-        Duration::from_millis(500),
-    )
-    .await;
-    wait_wiper_state(&controller, WiperState::Ready, Duration::from_millis(500)).await;
-    controller
-        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::AmbientLux(20)))
-        .await
-        .expect("low lux event");
+    wait_fsm_state(&controller, FsmState::Idle, Duration::from_millis(500)).await;
+    // Phase I startup is BCM-only; the compatibility headlamp actor is already Ready.
+    submit_fsm_event(&controller, FsmEvent::UpdateAmbientLux(20)).await;
 
     // No ACK/NACK event sent: headlamp twinlet ACK timer fires without gateway TimerTick.
     tokio::time::sleep(FRONT_HEADLAMP_ON_ACK_WAIT + Duration::from_millis(25)).await;

@@ -99,11 +99,11 @@ fn given_wiper_actuation_commands_when_compared_then_distinct() {
     );
 }
 
-// ── Step 9: end-to-end physical rain ingress ──────────────────────────────────
+// ── Step 9: internal rain FSM seam ────────────────────────────────────────────
 
 #[tokio::test]
-async fn given_idle_wiper_ready_when_rain_detected_true_ingress_then_running_and_start_wiper_command()
- {
+async fn given_idle_wiper_ready_when_rains_started_fsm_event_then_running_and_start_wiper_command()
+{
     let (controller, mut actuation_rx, _guard) = install_with_actuation("WIPER-E2E-1", 8).await;
     power_on_to_idle(&controller).await;
 
@@ -119,7 +119,7 @@ async fn given_idle_wiper_ready_when_rain_detected_true_ingress_then_running_and
 }
 
 #[tokio::test]
-async fn given_wiper_running_when_rain_detected_false_ingress_then_ready_and_stop_wiper_command() {
+async fn given_wiper_running_when_rains_stopped_fsm_event_then_ready_and_stop_wiper_command() {
     let (controller, mut actuation_rx, _guard) = install_with_actuation("WIPER-E2E-2", 8).await;
     power_on_to_idle(&controller).await;
 
@@ -141,7 +141,8 @@ async fn given_wiper_running_when_rain_detected_false_ingress_then_ready_and_sto
 }
 
 #[tokio::test]
-async fn given_rain_ingress_when_wiper_runs_then_diagnostics_prove_rain_wiper_coupling() {
+async fn given_rains_started_fsm_event_when_wiper_runs_then_diagnostics_prove_rain_wiper_coupling()
+{
     let (diag_tx, mut diag_rx) = mpsc::unbounded_channel();
     let (actuation_tx, mut actuation_rx) = mpsc::channel(8);
     let runtime_options = VehicleControllerRuntimeOptions {

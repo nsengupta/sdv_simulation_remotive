@@ -113,10 +113,10 @@ fn format_event(event: &PublishedFsmEvent) -> String {
 mod tests {
     use super::*;
     use common::facade::{
-        PublishedHeadlampContext, PublishedHeadlampState, PublishedHealthContext,
-        PublishedPowertrainContext, PublishedVehicleContext, PublishedVisibilityContext,
-        PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
-        UnixTimestamp,
+        PublishedBcmContext, PublishedBcmState, PublishedHeadlampContext, PublishedHeadlampState,
+        PublishedHealthContext, PublishedPowertrainContext, PublishedSccmContext,
+        PublishedVehicleContext, PublishedVisibilityContext, PublishedWeatherContext,
+        PublishedWheelRpm, PublishedWiperContext, PublishedWiperState, UnixTimestamp,
     };
     use std::time::Duration;
     use unicode_width::UnicodeWidthStr;
@@ -138,6 +138,14 @@ mod tests {
 
     fn empty_ctx() -> PublishedVehicleContext {
         PublishedVehicleContext {
+            sccm: PublishedSccmContext {
+                hazard_button_on: false,
+            },
+            bcm: PublishedBcmContext {
+                state: PublishedBcmState::Off,
+                left_turn_request_on: false,
+                right_turn_request_on: false,
+            },
             powertrain: PublishedPowertrainContext {
                 wheel_rpm: PublishedWheelRpm {
                     front_left: 0,
