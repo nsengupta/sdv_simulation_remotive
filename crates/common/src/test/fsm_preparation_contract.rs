@@ -216,10 +216,14 @@ fn test_preparing_to_start_carries_assembly_ids() {
         panic!("expected PreparingToStart, got {:?}", result.next_state);
     };
     assert!(
+        remaining.contains(&AssemblyId::Sccm),
+        "SCCM must be in the remaining set"
+    );
+    assert!(
         remaining.contains(&AssemblyId::Bcm),
         "BCM must be in the remaining set"
     );
-    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining.len(), 2);
 }
 
 #[test]
@@ -228,7 +232,10 @@ fn test_preparing_to_stop_carries_assembly_ids() {
     let FsmState::PreparingToStop(remaining) = &result.next_state else {
         panic!("expected PreparingToStop, got {:?}", result.next_state);
     };
-    assert_eq!(remaining, &BTreeSet::from([AssemblyId::Bcm]));
+    assert_eq!(
+        remaining,
+        &BTreeSet::from([AssemblyId::Sccm, AssemblyId::Bcm])
+    );
 }
 
 #[test]
@@ -259,8 +266,8 @@ fn test_state_and_action_agree_on_assembly_set() {
 
 #[test]
 fn test_assembly_zone_ready_shrinks_state_not_context() {
-    // After PowerOn: PreparingToStart({Bcm}).
-    // After AssemblyZoneReady(Bcm): Idle.
+    // After PowerOn: PreparingToStart({Sccm, Bcm}).
+    // After AssemblyZoneReady(Sccm) then AssemblyZoneReady(Bcm): Idle.
     // The countdown lives in the state; VehicleContext carries no separate field.
     let power_on = step(&FsmState::Off, &ctx(), &FsmEvent::PowerOn, Instant::now());
     let FsmState::PreparingToStart(after_power_on) = &power_on.next_state else {
@@ -268,13 +275,19 @@ fn test_assembly_zone_ready_shrinks_state_not_context() {
     };
     assert_eq!(
         after_power_on,
-        &BTreeSet::from([AssemblyId::Bcm]),
-        "only BCM is pending after PowerOn"
+        &BTreeSet::from([AssemblyId::Sccm, AssemblyId::Bcm]),
+        "SCCM and BCM are pending after PowerOn"
     );
 
-    let bcm_ready = step(
+    let sccm_ready = step(
         &power_on.next_state,
         &power_on.modified_ctx,
+        &FsmEvent::AssemblyZoneReady(AssemblyId::Sccm),
+        Instant::now(),
+    );
+    let bcm_ready = step(
+        &sccm_ready.next_state,
+        &sccm_ready.modified_ctx,
         &FsmEvent::AssemblyZoneReady(AssemblyId::Bcm),
         Instant::now(),
     );
@@ -295,5 +308,5 @@ fn test_start_assemblies_action_carries_assembly_list() {
             }
         })
         .expect("StartAssemblies must be in actions after PowerOn");
-    assert_eq!(list, vec![AssemblyId::Bcm]);
+    assert_eq!(list, vec![AssemblyId::Sccm, AssemblyId::Bcm]);
 }

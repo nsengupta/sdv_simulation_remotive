@@ -1,4 +1,4 @@
-use crate::signals::{ControlSignal, LifecycleCommand, VssSignal};
+use crate::signals::{ControlSignal, LifecycleCommand, ObservedEcuSignal, VssSignal};
 pub use crate::vehicle_physics::{
     RPM_EXTREME_OPERATION_THRESHOLD, RPM_IDLE, RPM_REDLINE_THRESHOLD,
     RPM_STRESS_DURATION_THRESHOLD_SECS, SPEED_EXTREME_OPERATION_THRESHOLD_KPH,
@@ -45,6 +45,8 @@ pub enum TwinIngressEvent {
     Telemetry(VssSignal),
     /// A validated driver control received from an ingress carrier.
     Control(ControlSignal),
+    /// A validated observation received independently from an ECU.
+    ObservedEcu(ObservedEcuSignal),
     /// A system-generated heartbeat or check.
     TimerTick,
     /// Emergency stop or system reset.

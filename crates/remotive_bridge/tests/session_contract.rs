@@ -1,10 +1,10 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use common::{ControlSignal, LifecycleCommand, VssSignal};
+use common::{LifecycleCommand, ObservedEcuSignal, VssSignal};
 use emulator::sink::FrameSink;
 use remotive_bridge::session::{SessionConfig, run_connected_session, run_session};
 use remotive_bridge::source::{
-    HazardConnector, HazardRead, HazardSource, RpmSource, ShutdownSource,
+    BrokerObservation, ObservationConnector, ObservationSource, RpmSource, ShutdownSource,
 };
 use socketcan::CanFrame;
 use std::collections::VecDeque;
@@ -30,11 +30,11 @@ impl FrameSink for RecordingSink {
     }
 }
 
-struct FakeHazards(VecDeque<Result<HazardRead>>);
+struct FakeObservations(VecDeque<Result<BrokerObservation>>);
 
 #[async_trait]
-impl HazardSource for FakeHazards {
-    async fn next_hazard(&mut self) -> Result<HazardRead> {
+impl ObservationSource for FakeObservations {
+    async fn next_observation(&mut self) -> Result<BrokerObservation> {
         match self.0.pop_front() {
             Some(item) => item,
             None => pending().await,
@@ -42,18 +42,18 @@ impl HazardSource for FakeHazards {
     }
 }
 
-struct RepeatingHazards {
+struct RepeatingObservations {
     remaining: usize,
 }
 
 #[async_trait]
-impl HazardSource for RepeatingHazards {
-    async fn next_hazard(&mut self) -> Result<HazardRead> {
+impl ObservationSource for RepeatingObservations {
+    async fn next_observation(&mut self) -> Result<BrokerObservation> {
         if self.remaining == 0 {
             pending().await
         } else {
             self.remaining -= 1;
-            Ok(HazardRead::Value(true))
+            Ok(BrokerObservation::HazardButton(true))
         }
     }
 }
@@ -91,8 +91,8 @@ impl ShutdownSource for ImmediateShutdown {
 struct FailedConnector;
 
 #[async_trait]
-impl HazardConnector for FailedConnector {
-    type Source = FakeHazards;
+impl ObservationConnector for FailedConnector {
+    type Source = FakeObservations;
 
     async fn connect(self) -> Result<Self::Source> {
         Err(anyhow!("subscription rejected"))
@@ -135,13 +135,14 @@ fn assert_controlled_edges(frames: &[CanFrame]) {
 #[tokio::test]
 async fn readings_limit_orders_power_on_body_and_controlled_trailer() {
     let mut sink = RecordingSink::default();
-    let mut hazards = FakeHazards(VecDeque::from([Ok(HazardRead::Value(true))]));
+    let mut observations =
+        FakeObservations(VecDeque::from([Ok(BrokerObservation::HazardButton(true))]));
     let mut rpm = FakeRpm(VecDeque::from([1100, 1200]));
     let mut shutdown = PendingShutdown;
 
     run_session(
         &mut sink,
-        &mut hazards,
+        &mut observations,
         &mut rpm,
         &mut shutdown,
         SessionConfig {
@@ -153,7 +154,7 @@ async fn readings_limit_orders_power_on_body_and_controlled_trailer() {
 
     assert_controlled_edges(&sink.frames);
     assert!(sink.frames[1..sink.frames.len() - 2].iter().any(|frame| {
-        ControlSignal::from_can_frame(frame) == Some(ControlSignal::HazardButton(true))
+        ObservedEcuSignal::from_can_frame(frame) == Some(ObservedEcuSignal::HazardButton(true))
     }));
     assert_eq!(
         sink.frames
@@ -173,13 +174,13 @@ async fn readings_limit_orders_power_on_body_and_controlled_trailer() {
 #[tokio::test]
 async fn sustained_ready_hazards_cannot_run_ahead_of_ready_rpm_until_exhaustion() {
     let mut sink = RecordingSink::default();
-    let mut hazards = RepeatingHazards { remaining: 64 };
+    let mut observations = RepeatingObservations { remaining: 64 };
     let mut rpm = FakeRpm(VecDeque::from([1200]));
     let mut shutdown = PendingShutdown;
 
     run_session(
         &mut sink,
-        &mut hazards,
+        &mut observations,
         &mut rpm,
         &mut shutdown,
         SessionConfig {
@@ -197,7 +198,7 @@ async fn sustained_ready_hazards_cannot_run_ahead_of_ready_rpm_until_exhaustion(
     let hazard_count_before_rpm = sink.frames[..rpm_index]
         .iter()
         .filter(|frame| {
-            ControlSignal::from_can_frame(frame) == Some(ControlSignal::HazardButton(true))
+            ObservedEcuSignal::from_can_frame(frame) == Some(ObservedEcuSignal::HazardButton(true))
         })
         .count();
 
@@ -211,13 +212,13 @@ async fn sustained_ready_hazards_cannot_run_ahead_of_ready_rpm_until_exhaustion(
 #[tokio::test]
 async fn sustained_ready_hazards_cannot_starve_ready_shutdown() {
     let mut sink = RecordingSink::default();
-    let mut hazards = RepeatingHazards { remaining: 64 };
+    let mut observations = RepeatingObservations { remaining: 64 };
     let mut rpm = FakeRpm(VecDeque::new());
     let mut shutdown = ImmediateShutdown;
 
     run_session(
         &mut sink,
-        &mut hazards,
+        &mut observations,
         &mut rpm,
         &mut shutdown,
         SessionConfig::default(),
@@ -229,7 +230,7 @@ async fn sustained_ready_hazards_cannot_starve_ready_shutdown() {
         .frames
         .iter()
         .filter(|frame| {
-            ControlSignal::from_can_frame(frame) == Some(ControlSignal::HazardButton(true))
+            ObservedEcuSignal::from_can_frame(frame) == Some(ObservedEcuSignal::HazardButton(true))
         })
         .count();
     assert!(
@@ -240,19 +241,20 @@ async fn sustained_ready_hazards_cannot_starve_ready_shutdown() {
 }
 
 #[tokio::test]
-async fn duplicate_hazards_each_emit_a_strict_can_frame() {
+async fn observations_emit_independent_strict_can_frames_in_source_order() {
     let mut sink = RecordingSink::default();
-    let mut hazards = FakeHazards(VecDeque::from([
-        Ok(HazardRead::Value(true)),
-        Ok(HazardRead::Value(true)),
-        Ok(HazardRead::End),
+    let mut observations = FakeObservations(VecDeque::from([
+        Ok(BrokerObservation::HazardButton(true)),
+        Ok(BrokerObservation::LeftTurnRequest(true)),
+        Ok(BrokerObservation::RightTurnRequest(false)),
+        Ok(BrokerObservation::End),
     ]));
     let mut rpm = FakeRpm(VecDeque::new());
     let mut shutdown = PendingShutdown;
 
     let error = run_session(
         &mut sink,
-        &mut hazards,
+        &mut observations,
         &mut rpm,
         &mut shutdown,
         SessionConfig::default(),
@@ -261,28 +263,36 @@ async fn duplicate_hazards_each_emit_a_strict_can_frame() {
     .unwrap_err();
 
     assert!(error.to_string().contains("broker stream ended"));
+    let observed: Vec<_> = sink
+        .frames
+        .iter()
+        .filter_map(ObservedEcuSignal::from_can_frame)
+        .collect();
     assert_eq!(
-        sink.frames
-            .iter()
-            .filter(|frame| ControlSignal::from_can_frame(frame)
-                == Some(ControlSignal::HazardButton(true)))
-            .count(),
-        2
+        observed,
+        [
+            ObservedEcuSignal::HazardButton(true),
+            ObservedEcuSignal::LeftTurnRequest(true),
+            ObservedEcuSignal::RightTurnRequest(false),
+        ]
     );
     assert_controlled_edges(&sink.frames);
 }
 
 #[tokio::test]
 async fn broker_end_and_error_write_trailer_then_fail_without_reconnect() {
-    for event in [Ok(HazardRead::End), Err(anyhow!("grpc stream failed"))] {
+    for event in [
+        Ok(BrokerObservation::End),
+        Err(anyhow!("grpc stream failed")),
+    ] {
         let mut sink = RecordingSink::default();
-        let mut hazards = FakeHazards(VecDeque::from([event]));
+        let mut observations = FakeObservations(VecDeque::from([event]));
         let mut rpm = FakeRpm(VecDeque::new());
         let mut shutdown = PendingShutdown;
 
         let error = run_session(
             &mut sink,
-            &mut hazards,
+            &mut observations,
             &mut rpm,
             &mut shutdown,
             SessionConfig::default(),
@@ -298,13 +308,13 @@ async fn broker_end_and_error_write_trailer_then_fail_without_reconnect() {
 #[tokio::test]
 async fn graceful_shutdown_writes_trailer_and_succeeds() {
     let mut sink = RecordingSink::default();
-    let mut hazards = FakeHazards(VecDeque::new());
+    let mut observations = FakeObservations(VecDeque::new());
     let mut rpm = FakeRpm(VecDeque::new());
     let mut shutdown = ImmediateShutdown;
 
     run_session(
         &mut sink,
-        &mut hazards,
+        &mut observations,
         &mut rpm,
         &mut shutdown,
         SessionConfig::default(),
@@ -321,13 +331,14 @@ async fn sink_failure_is_reported_without_trailer_retries() {
         fail_at: Some(1),
         ..RecordingSink::default()
     };
-    let mut hazards = FakeHazards(VecDeque::from([Ok(HazardRead::Value(true))]));
+    let mut observations =
+        FakeObservations(VecDeque::from([Ok(BrokerObservation::HazardButton(true))]));
     let mut rpm = FakeRpm(VecDeque::new());
     let mut shutdown = PendingShutdown;
 
     let error = run_session(
         &mut sink,
-        &mut hazards,
+        &mut observations,
         &mut rpm,
         &mut shutdown,
         SessionConfig::default(),
@@ -367,13 +378,13 @@ async fn trailer_failure_is_propagated_once_without_power_off_attempt() {
         fail_at: Some(1),
         ..RecordingSink::default()
     };
-    let mut hazards = FakeHazards(VecDeque::new());
+    let mut observations = FakeObservations(VecDeque::new());
     let mut rpm = FakeRpm(VecDeque::new());
     let mut shutdown = ImmediateShutdown;
 
     let error = run_session(
         &mut sink,
-        &mut hazards,
+        &mut observations,
         &mut rpm,
         &mut shutdown,
         SessionConfig::default(),

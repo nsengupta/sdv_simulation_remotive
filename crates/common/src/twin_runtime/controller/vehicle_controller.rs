@@ -26,7 +26,7 @@ pub enum VehicleControllerError {
 /// Selects the actor topology installed by the controller.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AssemblyTopology {
-    /// Phase I production topology: BCM is the only spawned and routed assembly.
+    /// Active integration topology: SCCM and BCM are spawned and routed.
     #[default]
     PhaseI,
     /// Explicit compatibility topology for legacy headlamp/wiper applications and tests.
@@ -53,6 +53,9 @@ pub struct VehicleControllerRuntimeOptions {
     /// Contract tests: BCM twinlet ignores tells (manual `ZoneReady` injection needed).
     #[doc(hidden)]
     pub test_silent_bcm: bool,
+    /// Contract tests: SCCM twinlet ignores tells (manual `ZoneReady` injection needed).
+    #[doc(hidden)]
+    pub test_silent_sccm: bool,
 }
 
 impl Default for VehicleControllerRuntimeOptions {
@@ -66,6 +69,7 @@ impl Default for VehicleControllerRuntimeOptions {
             test_silent_headlamp: false,
             test_silent_wiper: false,
             test_silent_bcm: false,
+            test_silent_sccm: false,
         }
     }
 }

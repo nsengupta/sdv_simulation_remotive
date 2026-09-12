@@ -1,10 +1,11 @@
 use remotive_bridge::cli::{
     DEFAULT_BROKER_URL, DEFAULT_CAN_INTERFACE, DEFAULT_TICK_MS, parse_args,
 };
-use remotive_bridge::decoder::decode_hazard;
+use remotive_bridge::decoder::decode_boolean;
 use remotive_bridge::source::{
-    CLIENT_ID, HAZARD_NAME, HAZARD_NAMESPACE, HazardRejectCounters, ProfileRpmSource, RpmSource,
-    decode_hazard_signals, subscription_config, subscription_ready_status,
+    BrokerObservation, CLIENT_ID, HAZARD_NAME, HAZARD_NAMESPACE, LEFT_TURN_NAME,
+    ObservationRejectCounters, ProfileRpmSource, RIGHT_TURN_NAME, RpmSource, TURN_NAMESPACE,
+    decode_observation_signals, subscription_config, subscription_ready_status,
 };
 use remotivelabs_broker::generated::base::signal::Payload;
 use remotivelabs_broker::generated::base::{NameSpace, Signal, SignalId, Signals};
@@ -12,13 +13,27 @@ use std::num::NonZeroUsize;
 use std::time::Duration;
 
 #[test]
-fn subscription_config_is_exact_and_preserves_duplicates() {
+fn subscription_config_contains_exactly_three_ordered_signal_ids() {
     let config = subscription_config();
     assert_eq!(config.client_id.unwrap().id, CLIENT_ID);
     let ids = config.signals.unwrap().signal_id;
-    assert_eq!(ids.len(), 1);
-    assert_eq!(ids[0].name, HAZARD_NAME);
-    assert_eq!(ids[0].namespace.as_ref().unwrap().name, HAZARD_NAMESPACE);
+    let identities: Vec<_> = ids
+        .iter()
+        .map(|id| {
+            (
+                id.namespace.as_ref().unwrap().name.as_str(),
+                id.name.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        identities,
+        [
+            (HAZARD_NAMESPACE, HAZARD_NAME),
+            (TURN_NAMESPACE, LEFT_TURN_NAME),
+            (TURN_NAMESPACE, RIGHT_TURN_NAME),
+        ]
+    );
     assert!(!config.on_change);
     assert!(!config.initial_empty);
 }
@@ -27,13 +42,15 @@ fn subscription_config_is_exact_and_preserves_duplicates() {
 fn subscription_ready_status_proves_connection_and_exact_target() {
     assert_eq!(
         subscription_ready_status(),
-        "[remotive_bridge] connected; subscribed signal=\
-SCCM-DriverCan0:HazardLightButton.HazardLightButton"
+        "[remotive_bridge] connected; subscribed signals=\
+SCCM-DriverCan0:HazardLightButton.HazardLightButton,\
+BCM-BodyCan0:TurnLightControl.LeftTurnLightRequest,\
+BCM-BodyCan0:TurnLightControl.RightTurnLightRequest"
     );
 }
 
 #[test]
-fn decoder_accepts_only_documented_hazard_encodings() {
+fn decoder_accepts_only_documented_boolean_encodings() {
     for (payload, expected) in [
         (Payload::Integer(0), false),
         (Payload::Integer(1), true),
@@ -42,7 +59,7 @@ fn decoder_accepts_only_documented_hazard_encodings() {
         (Payload::StrValue("Off".into()), false),
         (Payload::StrValue("On".into()), true),
     ] {
-        assert_eq!(decode_hazard(Some(&payload)), Some(expected));
+        assert_eq!(decode_boolean(Some(&payload)), Some(expected));
     }
 
     let malformed = [
@@ -57,7 +74,7 @@ fn decoder_accepts_only_documented_hazard_encodings() {
         Some(Payload::StrValue("invalid".into())),
     ];
     for payload in malformed {
-        assert_eq!(decode_hazard(payload.as_ref()), None);
+        assert_eq!(decode_boolean(payload.as_ref()), None);
     }
 }
 
@@ -76,7 +93,7 @@ fn signal(namespace: Option<&str>, name: &str, payload: Option<Payload>) -> Sign
 }
 
 #[test]
-fn broker_batch_decodes_only_exact_hazard_signal_identity() {
+fn broker_batch_preserves_exact_hazard_right_left_signal_order() {
     let batch = Signals {
         signal: vec![
             signal(
@@ -85,16 +102,102 @@ fn broker_batch_decodes_only_exact_hazard_signal_identity() {
                 Some(Payload::Integer(1)),
             ),
             signal(
+                Some(TURN_NAMESPACE),
+                RIGHT_TURN_NAME,
+                Some(Payload::Integer(0)),
+            ),
+            signal(
+                Some(TURN_NAMESPACE),
+                LEFT_TURN_NAME,
+                Some(Payload::StrValue("On".into())),
+            ),
+        ],
+    };
+    let mut rejected = ObservationRejectCounters::default();
+
+    assert_eq!(
+        decode_observation_signals(&batch, &mut rejected),
+        vec![
+            BrokerObservation::HazardButton(true),
+            BrokerObservation::RightTurnRequest(false),
+            BrokerObservation::LeftTurnRequest(true),
+        ]
+    );
+    assert_eq!(rejected.wrong_identity(), 0);
+    assert_eq!(rejected.invalid_payload(), 0);
+}
+
+#[test]
+fn left_and_right_batches_are_valid_independently() {
+    let left_only = Signals {
+        signal: vec![signal(
+            Some(TURN_NAMESPACE),
+            LEFT_TURN_NAME,
+            Some(Payload::Uinteger64(1)),
+        )],
+    };
+    let right_only = Signals {
+        signal: vec![signal(
+            Some(TURN_NAMESPACE),
+            RIGHT_TURN_NAME,
+            Some(Payload::StrValue("Off".into())),
+        )],
+    };
+    let mut rejected = ObservationRejectCounters::default();
+
+    assert_eq!(
+        decode_observation_signals(&left_only, &mut rejected),
+        vec![BrokerObservation::LeftTurnRequest(true)]
+    );
+    assert_eq!(
+        decode_observation_signals(&right_only, &mut rejected),
+        vec![BrokerObservation::RightTurnRequest(false)]
+    );
+}
+
+#[test]
+fn values_from_separate_batches_remain_independent() {
+    let mut rejected = ObservationRejectCounters::default();
+    let left = Signals {
+        signal: vec![signal(
+            Some(TURN_NAMESPACE),
+            LEFT_TURN_NAME,
+            Some(Payload::Integer(1)),
+        )],
+    };
+    let right = Signals {
+        signal: vec![signal(
+            Some(TURN_NAMESPACE),
+            RIGHT_TURN_NAME,
+            Some(Payload::Integer(1)),
+        )],
+    };
+
+    assert_eq!(
+        decode_observation_signals(&left, &mut rejected),
+        vec![BrokerObservation::LeftTurnRequest(true)]
+    );
+    assert_eq!(
+        decode_observation_signals(&right, &mut rejected),
+        vec![BrokerObservation::RightTurnRequest(true)]
+    );
+}
+
+#[test]
+fn decoder_rejects_wrong_identity_and_malformed_payload() {
+    let batch = Signals {
+        signal: vec![
+            signal(
                 Some("wrong-namespace"),
                 HAZARD_NAME,
                 Some(Payload::Integer(0)),
             ),
             signal(
-                Some(HAZARD_NAMESPACE),
+                Some(TURN_NAMESPACE),
                 "wrong-name",
                 Some(Payload::Integer(0)),
             ),
-            signal(None, HAZARD_NAME, Some(Payload::Integer(0))),
+            signal(None, LEFT_TURN_NAME, Some(Payload::Integer(0))),
             Signal {
                 id: None,
                 raw: vec![],
@@ -102,15 +205,15 @@ fn broker_batch_decodes_only_exact_hazard_signal_identity() {
                 payload: Some(Payload::Integer(0)),
             },
             signal(
-                Some(HAZARD_NAMESPACE),
-                HAZARD_NAME,
+                Some(TURN_NAMESPACE),
+                RIGHT_TURN_NAME,
                 Some(Payload::Integer(2)),
             ),
         ],
     };
-    let mut rejected = HazardRejectCounters::default();
+    let mut rejected = ObservationRejectCounters::default();
 
-    assert_eq!(decode_hazard_signals(&batch, &mut rejected), vec![true]);
+    assert!(decode_observation_signals(&batch, &mut rejected).is_empty());
     assert_eq!(rejected.wrong_identity(), 4);
     assert_eq!(rejected.invalid_payload(), 1);
 }
@@ -150,9 +253,14 @@ fn cli_rejects_empty_or_non_positive_values_and_unknown_flags() {
 }
 
 #[tokio::test]
-async fn reused_daytime_profile_exposes_only_an_rpm_reading() {
+async fn observation_rpm_stays_at_or_below_driving_threshold() {
     let mut source = ProfileRpmSource::new(Duration::from_millis(1));
-    let rpm: u16 = source.next_rpm().await.unwrap();
-
-    assert!((common::RPM_IDLE..=emulator::models::DAYTIME_TUNNEL_RPM_CEILING).contains(&rpm));
+    for _ in 0..200 {
+        let rpm = source.next_rpm().await.unwrap();
+        assert!(
+            rpm <= common::RPM_DRIVING_THRESHOLD,
+            "temporary observation profile must not enter Driving, got {rpm}"
+        );
+        assert!(rpm >= common::RPM_IDLE);
+    }
 }

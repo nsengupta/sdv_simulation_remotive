@@ -95,7 +95,10 @@ pub fn transition(
             },
         },
         Idle => match event {
-            HazardButtonChanged(_) => TransitionResult {
+            HazardButtonChanged(_)
+            | HazardButtonObserved(_)
+            | LeftTurnRequestObserved(_)
+            | RightTurnRequestObserved(_) => TransitionResult {
                 next_state: Idle,
                 note: None,
             },
@@ -113,7 +116,10 @@ pub fn transition(
             },
         },
         Driving => match event {
-            HazardButtonChanged(_) => TransitionResult {
+            HazardButtonChanged(_)
+            | HazardButtonObserved(_)
+            | LeftTurnRequestObserved(_)
+            | RightTurnRequestObserved(_) => TransitionResult {
                 next_state: Driving,
                 note: None,
             },
@@ -139,7 +145,10 @@ pub fn transition(
             },
         },
         DrivingDangerously => match event {
-            HazardButtonChanged(_) => TransitionResult {
+            HazardButtonChanged(_)
+            | HazardButtonObserved(_)
+            | LeftTurnRequestObserved(_)
+            | RightTurnRequestObserved(_) => TransitionResult {
                 next_state: DrivingDangerously,
                 note: None,
             },
@@ -165,7 +174,10 @@ pub fn transition(
             },
         },
         ExtremeOperationWarning(began_at) => match event {
-            HazardButtonChanged(_) => TransitionResult {
+            HazardButtonChanged(_)
+            | HazardButtonObserved(_)
+            | LeftTurnRequestObserved(_)
+            | RightTurnRequestObserved(_) => TransitionResult {
                 next_state: ExtremeOperationWarning(*began_at),
                 note: None,
             },

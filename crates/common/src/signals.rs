@@ -8,6 +8,8 @@ pub const ID_AMBIENT_LUX: u16 = 0x103;
 /// `true` = rain detected; `false` = no rain.
 pub const ID_RAIN_DETECTED: u16 = 0x104;
 pub const ID_HAZARD: u16 = 0x105;
+pub const ID_LEFT_TURN_REQUEST: u16 = 0x106;
+pub const ID_RIGHT_TURN_REQUEST: u16 = 0x107;
 
 /// A lifecycle request decoded from an external ingress carrier.
 ///
@@ -88,6 +90,51 @@ impl ControlSignal {
             socketcan::Error::from(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "hazard payload must fit a classic CAN frame",
+            ))
+        })
+    }
+}
+
+/// A validated, transport-independent observation received from an ECU.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObservedEcuSignal {
+    HazardButton(bool),
+    LeftTurnRequest(bool),
+    RightTurnRequest(bool),
+}
+
+impl ObservedEcuSignal {
+    /// Decode one strict two-byte boolean observation from a standard internal CAN carrier.
+    pub fn from_can_frame(frame: &CanFrame) -> Option<Self> {
+        let socketcan::Id::Standard(id) = frame.id() else {
+            return None;
+        };
+        let value = match frame.data() {
+            [0, 0] => false,
+            [1, 0] => true,
+            _ => return None,
+        };
+
+        match id.as_raw() {
+            ID_HAZARD => Some(Self::HazardButton(value)),
+            ID_LEFT_TURN_REQUEST => Some(Self::LeftTurnRequest(value)),
+            ID_RIGHT_TURN_REQUEST => Some(Self::RightTurnRequest(value)),
+            _ => None,
+        }
+    }
+
+    /// Encode one observation as its strict two-byte standard internal CAN carrier.
+    pub fn to_can_frame(self) -> Result<CanFrame, socketcan::Error> {
+        let (id, value) = match self {
+            Self::HazardButton(value) => (ID_HAZARD, value),
+            Self::LeftTurnRequest(value) => (ID_LEFT_TURN_REQUEST, value),
+            Self::RightTurnRequest(value) => (ID_RIGHT_TURN_REQUEST, value),
+        };
+        let id = StandardId::new(id).expect("observed ECU CAN ID is a valid standard ID");
+        CanFrame::new(id, &[value as u8, 0]).ok_or_else(|| {
+            socketcan::Error::from(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "observed ECU payload must fit a classic CAN frame",
             ))
         })
     }

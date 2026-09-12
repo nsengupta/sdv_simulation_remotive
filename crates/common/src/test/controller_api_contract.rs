@@ -101,8 +101,9 @@ async fn given_applied_events_when_get_snapshot_then_as_of_seq_counts_every_even
         "PowerOn → PreparingToStart is seq 1"
     );
 
-    // Phase I startup barrier drains for BCM only.
-    // seq 2: AssemblyZoneReady(Bcm) → Idle
+    // Active startup barrier drains SCCM then BCM.
+    // seq 2: AssemblyZoneReady(Sccm)
+    // seq 3: AssemblyZoneReady(Bcm) → Idle
     wait_fsm_state(&controller, FsmState::Idle, Duration::from_millis(500)).await;
     let after_idle = controller
         .get_snapshot(Some(Duration::from_millis(250)))
@@ -110,8 +111,8 @@ async fn given_applied_events_when_get_snapshot_then_as_of_seq_counts_every_even
         .expect("snapshot");
     assert_eq!(
         after_idle.as_of_seq(),
-        2,
-        "AssemblyZoneReady(Bcm) → Idle is seq 2"
+        3,
+        "AssemblyZoneReady(Bcm) → Idle is seq 3"
     );
 
     // RPM in dark: one zone hop; LightingUnsafe registration is disabled in Phase I.
@@ -127,7 +128,7 @@ async fn given_applied_events_when_get_snapshot_then_as_of_seq_counts_every_even
         .expect("snapshot");
     assert_eq!(
         after_rpm.as_of_seq(),
-        3,
+        4,
         "dark driving entry emits one RPM row"
     );
     // A pure query does not advance the ledger.
@@ -135,7 +136,7 @@ async fn given_applied_events_when_get_snapshot_then_as_of_seq_counts_every_even
         .get_snapshot(Some(Duration::from_millis(250)))
         .await
         .expect("snapshot");
-    assert_eq!(again.as_of_seq(), 3);
+    assert_eq!(again.as_of_seq(), 4);
 }
 
 #[tokio::test]

@@ -30,7 +30,7 @@ use crate::vehicle_state::{WiperContext, WiperMessage, WiperState, WiperZoneRepl
 /// Headlamp startup barrier = turn 2
 /// Wiper startup barrier = turn 3
 /// First user event = turn 4
-const FIRST_USER_TURN: u64 = 3;
+const FIRST_USER_TURN: u64 = 4;
 
 /// Poll until the wiper assembly reaches `expected` state.
 pub async fn wait_wiper_state(
@@ -186,7 +186,7 @@ async fn boot_silent_both(
 ) {
     controller.send_power_on().await.expect("power on");
     crate::test::wait_fsm_state(controller, FsmState::Idle, Duration::from_millis(500)).await;
-    drain_n(rx, 2, Duration::from_secs(3)).await;
+    drain_n(rx, 3, Duration::from_secs(3)).await;
 }
 
 // ── Test 1: AssemblyId::Wiper is distinct ─────────────────────────────────────────

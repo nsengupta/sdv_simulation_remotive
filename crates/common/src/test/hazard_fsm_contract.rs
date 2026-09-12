@@ -3,21 +3,31 @@ use std::time::Instant;
 
 use crate::fsm::{AssemblyId, DomainAction, FsmEvent, FsmState, transition};
 use crate::twin_runtime::{ZoneReplies, run_to_quiescence, twin_turn};
-use crate::vehicle_state::{BcmState, VehicleContext};
+use crate::vehicle_state::{BcmState, ObservedBool, VehicleContext};
 
 #[test]
-fn power_lifecycle_waits_for_bcm_only() {
+fn power_lifecycle_waits_for_sccm_and_bcm() {
     let now = Instant::now();
     let ctx = VehicleContext::default();
-    let expected = BTreeSet::from([AssemblyId::Bcm]);
+    let expected = BTreeSet::from([AssemblyId::Sccm, AssemblyId::Bcm]);
 
     let starting = transition(&FsmState::Off, &FsmEvent::PowerOn, &ctx, now);
     assert_eq!(
         starting.next_state,
         FsmState::PreparingToStart(expected.clone())
     );
-    let ready = transition(
+    let after_sccm = transition(
         &starting.next_state,
+        &FsmEvent::AssemblyZoneReady(AssemblyId::Sccm),
+        &ctx,
+        now,
+    );
+    assert_eq!(
+        after_sccm.next_state,
+        FsmState::PreparingToStart(BTreeSet::from([AssemblyId::Bcm]))
+    );
+    let ready = transition(
+        &after_sccm.next_state,
         &FsmEvent::AssemblyZoneReady(AssemblyId::Bcm),
         &ctx,
         now,
@@ -48,14 +58,14 @@ fn hazard_self_loops_in_every_active_mode_before_unrelated_context_guards() {
         (FsmState::DrivingDangerously, dangerous_ctx),
         (FsmState::ExtremeOperationWarning(now), warning_ctx),
     ] {
-        let result = transition(&state, &FsmEvent::HazardButtonChanged(true), &ctx, now);
+        let result = transition(&state, &FsmEvent::HazardButtonObserved(true), &ctx, now);
         assert_eq!(result.next_state, state, "hazard moved active mode");
         assert!(result.note.is_none());
     }
 }
 
 #[test]
-fn active_hazard_updates_sccm_and_bcm_and_maps_one_atomic_action() {
+fn observed_hazard_updates_sccm_without_bcm_turn_computation() {
     let now = Instant::now();
     for state in [
         FsmState::Idle,
@@ -68,23 +78,28 @@ fn active_hazard_updates_sccm_and_bcm_and_maps_one_atomic_action() {
         ctx.powertrain.apply_rpm(500);
         ctx.powertrain.refresh_speed();
 
-        let result = twin_turn(&state, &ctx, &FsmEvent::HazardButtonChanged(true), now);
+        let result = twin_turn(&state, &ctx, &FsmEvent::HazardButtonObserved(true), now);
         assert_eq!(result.next_state, state);
-        assert!(result.modified_ctx.sccm.hazard_button_on);
-        assert!(result.modified_ctx.bcm.left_turn_request_on);
-        assert!(result.modified_ctx.bcm.right_turn_request_on);
+        assert_eq!(result.modified_ctx.sccm.hazard_button, ObservedBool::On);
         assert_eq!(
-            result.actions,
-            vec![DomainAction::SetTurnLights {
-                left_on: true,
-                right_on: true,
-            }]
+            result.modified_ctx.bcm.left_turn_request,
+            ObservedBool::Unknown
+        );
+        assert_eq!(
+            result.modified_ctx.bcm.right_turn_request,
+            ObservedBool::Unknown
+        );
+        assert!(
+            !result
+                .actions
+                .iter()
+                .any(|action| matches!(action, DomainAction::SetTurnLights { .. }))
         );
     }
 }
 
 #[test]
-fn duplicate_active_hazard_still_records_self_loop_without_action() {
+fn duplicate_active_hazard_changed_still_records_self_loop_without_action() {
     let now = Instant::now();
     let mut ctx = VehicleContext::default();
     ctx.sccm.hazard_button_on = true;

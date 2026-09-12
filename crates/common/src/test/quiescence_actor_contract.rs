@@ -106,8 +106,12 @@ async fn given_actor_idle_when_power_on_then_single_ledger_row_and_idle_state() 
     assert_eq!(record_start.event, PublishedFsmEvent::PowerOn);
     assert_eq!(record_start.next_state, PublishedFsmState::PreparingToStart);
 
+    let record_sccm = rx.recv().await.expect("SCCM zone ready ledger row");
+    assert_eq!(record_sccm.record_seq, 2);
+    assert_eq!(record_sccm.next_state, PublishedFsmState::PreparingToStart);
+
     let record_idle = rx.recv().await.expect("BCM zone ready → idle ledger row");
-    assert_eq!(record_idle.record_seq, 2);
+    assert_eq!(record_idle.record_seq, 3);
     assert_eq!(record_idle.next_state, PublishedFsmState::Idle);
 
     let snapshot = controller
@@ -115,7 +119,7 @@ async fn given_actor_idle_when_power_on_then_single_ledger_row_and_idle_state() 
         .await
         .expect("snapshot");
     assert_eq!(*snapshot.current_state(), FsmState::Idle);
-    assert_eq!(snapshot.as_of_seq(), 2);
+    assert_eq!(snapshot.as_of_seq(), 3);
 }
 
 #[tokio::test]
@@ -140,11 +144,10 @@ async fn given_actor_driving_in_dark_when_ack_wait_elapses_then_two_ledger_rows_
         handle,
     };
 
-    // drain two BCM-only boot rows:
-    // row 1 = PowerOn → PreparingToStart
-    // row 2 = AssemblyZoneReady(Bcm) → Idle
+    // drain active boot rows: PowerOn, SCCM ready, BCM ready → Idle
     power_on_to_idle(&controller).await;
     let _ = rx.recv().await.expect("power on → preparing row");
+    let _ = rx.recv().await.expect("SCCM zone ready row");
     let _ = rx.recv().await.expect("BCM zone ready → idle row");
 
     crate::test::submit_daylight_ambient(&controller).await;

@@ -131,6 +131,9 @@ fn test_step_standard_commute_flow() {
         (FsmEvent::PowerOn, |s| {
             matches!(s, FsmState::PreparingToStart { .. })
         }),
+        (FsmEvent::AssemblyZoneReady(AssemblyId::Sccm), |s| {
+            matches!(s, FsmState::PreparingToStart { .. })
+        }),
         (FsmEvent::AssemblyZoneReady(AssemblyId::Bcm), |s| {
             matches!(s, FsmState::Idle)
         }),
@@ -142,6 +145,9 @@ fn test_step_standard_commute_flow() {
         }),
         (FsmEvent::UpdateRpm(0), |s| matches!(s, FsmState::Idle)),
         (FsmEvent::PowerOff, |s| {
+            matches!(s, FsmState::PreparingToStop { .. })
+        }),
+        (FsmEvent::AssemblyZoneReady(AssemblyId::Sccm), |s| {
             matches!(s, FsmState::PreparingToStop { .. })
         }),
         (FsmEvent::AssemblyZoneReady(AssemblyId::Bcm), |s| {
@@ -171,9 +177,10 @@ fn test_state_laws_hold_over_a_legal_journey_and_records_carry_intents() {
     let mut reached_warning = false;
 
     // PowerOn bridges via PreparingToStart before Idle.
-    // Phase I lifecycle waits only for BCM.
+    // Active lifecycle waits for SCCM then BCM.
     for event in [
         FsmEvent::PowerOn,
+        FsmEvent::AssemblyZoneReady(AssemblyId::Sccm),
         FsmEvent::AssemblyZoneReady(AssemblyId::Bcm),
         FsmEvent::UpdateRpm(1500),
         FsmEvent::UpdateRpm(5600),

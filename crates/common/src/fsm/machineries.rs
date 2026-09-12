@@ -14,7 +14,7 @@ pub use crate::vehicle_state::{FrontHeadlampIncompleteCause, FrontHeadlampSwitch
 /// Single source of truth for assembly topology. Used to seed the initial
 /// `BTreeSet` inside `PreparingToStart` / `PreparingToStop` on the entry transitions
 /// and to populate `StartAssemblies` / `StopAssemblies` action payloads.
-pub(crate) const ALL_ASSEMBLIES: &[AssemblyId] = &[AssemblyId::Bcm];
+pub(crate) const ALL_ASSEMBLIES: &[AssemblyId] = &[AssemblyId::Sccm, AssemblyId::Bcm];
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FsmState {
@@ -47,6 +47,7 @@ pub enum FsmState {
 /// without coupling the brain to zone-specific types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum AssemblyId {
+    Sccm,
     Bcm,
     Headlamp,
     /// assembly: windshield wiper.
@@ -65,6 +66,9 @@ pub enum FsmEvent {
     PowerOff,
     UpdateRpm(u16),
     HazardButtonChanged(bool),
+    HazardButtonObserved(bool),
+    LeftTurnRequestObserved(bool),
+    RightTurnRequestObserved(bool),
     UpdateAmbientLux(u16),
     FrontHeadlampOnAck,
     FrontHeadlampOffAck,

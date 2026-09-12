@@ -7,6 +7,7 @@
 pub mod bcm;
 pub mod front_headlamp;
 pub mod health;
+pub mod observed;
 pub mod powertrain;
 pub mod sccm;
 pub mod visibility;
@@ -19,11 +20,12 @@ pub use front_headlamp::{
     HeadlampOutcome, HeadlampState, HeadlampZoneReply,
 };
 pub use health::{HealthState, VehicleHealthContext};
+pub use observed::{ObservationDisposition, ObservedBool};
 pub use powertrain::{
     PowertrainContext, PowertrainMessage, PowertrainMode, PowertrainOutcome, PowertrainState,
     WheelRpm,
 };
-pub use sccm::SccmContext;
+pub use sccm::{SccmContext, SccmMessage, SccmZoneReply};
 pub use visibility::{VisibilityContext, VisibilityMessage, VisibilityOutcome, VisibilityState};
 pub use weather::WeatherContext;
 pub use wiper::{WiperContext, WiperMessage, WiperOutcome, WiperState, WiperZoneReply};

@@ -30,13 +30,13 @@ use crate::{TwinIngressEvent, VehicleController, VssSignal};
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-/// Turn ID allocated for the startup barrier (`StartAssemblies` loop, turn 2).
-const STARTUP_BARRIER_TURN: u64 = 2;
+/// Turn ID allocated for the BCM startup barrier after SCCM (`StartAssemblies` loop).
+const STARTUP_BCM_TURN: u64 = 3;
 
-/// Current startup allocates one barrier turn for each named assembly: headlamp and wiper.
+/// Current startup allocates one barrier turn for each named assembly: SCCM and BCM.
 /// These counts keep direct IDs confined to the silent-zone test seam without exposing
 /// production turn-allocation internals.
-const STARTUP_ASSEMBLY_BARRIER_COUNT: u64 = 1;
+const STARTUP_ASSEMBLY_BARRIER_COUNT: u64 = 2;
 const QUEUED_POST_POWER_ON_INGRESS_COUNT: u64 = 4;
 
 fn zone_reply_with_state(state: BcmState) -> ZoneReply {
@@ -46,6 +46,7 @@ fn zone_reply_with_state(state: BcmState) -> ZoneReply {
             ..Default::default()
         },
         outcomes: vec![],
+        disposition: crate::vehicle_state::ObservationDisposition::Lifecycle,
     })
 }
 
@@ -160,7 +161,7 @@ async fn given_power_off_with_silent_headlamp_then_fsm_stays_in_preparing_to_sto
     // will not send.
     controller.send_power_on().await.expect("power on");
     tokio::task::yield_now().await;
-    inject_zone_ready(&controller, STARTUP_BARRIER_TURN, BcmState::Ready);
+    inject_zone_ready(&controller, STARTUP_BCM_TURN, BcmState::Ready);
     wait_fsm_state(&controller, FsmState::Idle, Duration::from_millis(500)).await;
 
     // Now try to power off — silent headlamp will not reply to BecomeOff.
@@ -237,12 +238,13 @@ async fn given_ingress_immediately_after_power_on_when_startup_unblocks_then_com
 
     let power_on = transition_rx.recv().await.expect("PowerOn row");
     assert_eq!(power_on.event, PublishedFsmEvent::PowerOn);
+    let _sccm_ready = transition_rx.recv().await.expect("SCCM ready row");
     assert!(
         transition_rx.try_recv().is_err(),
         "later turns must remain blocked"
     );
 
-    inject_zone_ready(&controller, STARTUP_BARRIER_TURN, BcmState::Ready);
+    inject_zone_ready(&controller, STARTUP_BCM_TURN, BcmState::Ready);
     let deadline = std::time::Instant::now() + Duration::from_millis(500);
     loop {
         let snapshot = controller
@@ -283,10 +285,11 @@ async fn given_ingress_immediately_after_power_on_when_startup_unblocks_then_com
 
     // The next turn after both startup barriers and the four queued ingress turns is
     // the first shutdown assembly barrier (headlamp).
-    const QUEUED_SHUTDOWN_HEADLAMP_TURN: u64 =
-        STARTUP_BARRIER_TURN + STARTUP_ASSEMBLY_BARRIER_COUNT + QUEUED_POST_POWER_ON_INGRESS_COUNT;
-    inject_zone_ready(&controller, QUEUED_SHUTDOWN_HEADLAMP_TURN, BcmState::Off);
+    const QUEUED_SHUTDOWN_BCM_TURN: u64 =
+        STARTUP_BCM_TURN + STARTUP_ASSEMBLY_BARRIER_COUNT + QUEUED_POST_POWER_ON_INGRESS_COUNT;
+    inject_zone_ready(&controller, QUEUED_SHUTDOWN_BCM_TURN, BcmState::Off);
     wait_fsm_state(&controller, FsmState::Off, Duration::from_millis(500)).await;
+    let _sccm_stopped = transition_rx.recv().await.expect("SCCM shutdown row");
     let final_off = transition_rx.recv().await.expect("BCM shutdown row");
     assert_eq!(final_off.next_state, PublishedFsmState::Off);
 }

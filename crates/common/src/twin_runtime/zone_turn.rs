@@ -7,7 +7,7 @@ use crate::fsm::{AssemblyId, FsmEvent, FsmState};
 use crate::twin_runtime::zone_replies::ZoneReplies;
 use crate::vehicle_state::{
     BcmMessage, BcmOutcome, BcmZoneReply, HeadlampMessage, HeadlampOutcome, HeadlampZoneReply,
-    VehicleContext, WiperMessage, WiperOutcome, WiperZoneReply,
+    SccmMessage, SccmZoneReply, VehicleContext, WiperMessage, WiperOutcome, WiperZoneReply,
 };
 
 /// Tagged zone egress for one `zone_turn` call — replaces the per-zone
@@ -56,6 +56,18 @@ pub(crate) fn zone_message_for_event(
 /// which carry their reply embedded in the barrier.
 fn user_event_to_zone_tell(event: &FsmEvent) -> Option<(AssemblyId, ZoneMessage)> {
     match event {
+        FsmEvent::HazardButtonObserved(on) => Some((
+            AssemblyId::Sccm,
+            ZoneMessage::Sccm(SccmMessage::HazardButtonObserved(*on)),
+        )),
+        FsmEvent::LeftTurnRequestObserved(on) => Some((
+            AssemblyId::Bcm,
+            ZoneMessage::Bcm(BcmMessage::LeftTurnRequestObserved(*on)),
+        )),
+        FsmEvent::RightTurnRequestObserved(on) => Some((
+            AssemblyId::Bcm,
+            ZoneMessage::Bcm(BcmMessage::RightTurnRequestObserved(*on)),
+        )),
         FsmEvent::HazardButtonChanged(on) => Some((
             AssemblyId::Bcm,
             ZoneMessage::Bcm(BcmMessage::HazardButtonChanged(*on)),
@@ -90,6 +102,16 @@ fn user_event_to_zone_tell(event: &FsmEvent) -> Option<(AssemblyId, ZoneMessage)
         | FsmEvent::Internal(_)
         | FsmEvent::AssemblyZoneReady(_) => None,
     }
+}
+
+fn merge_sccm_for_message(
+    ctx: &VehicleContext,
+    message: SccmMessage,
+    tell_back: Option<&SccmZoneReply>,
+) -> SccmZoneReply {
+    tell_back
+        .cloned()
+        .unwrap_or_else(|| ctx.sccm.on_receiving_message(message))
 }
 
 fn merge_bcm_for_message(
@@ -143,8 +165,28 @@ pub fn zone_turn(
     let bcm_ingress = zone_replies
         .get(&AssemblyId::Bcm)
         .and_then(ZoneReply::as_bcm);
+    let sccm_ingress = zone_replies
+        .get(&AssemblyId::Sccm)
+        .and_then(ZoneReply::as_sccm);
 
     match event {
+        FsmEvent::HazardButtonObserved(on) => {
+            let zone_reply =
+                merge_sccm_for_message(ctx, SccmMessage::HazardButtonObserved(*on), sccm_ingress);
+            next.sccm = zone_reply.ctx;
+        }
+        FsmEvent::LeftTurnRequestObserved(on) => {
+            let zone_reply =
+                merge_bcm_for_message(ctx, BcmMessage::LeftTurnRequestObserved(*on), bcm_ingress);
+            next.bcm = zone_reply.ctx;
+            outcomes.extend(zone_reply.outcomes.into_iter().map(ZoneOutcome::Bcm));
+        }
+        FsmEvent::RightTurnRequestObserved(on) => {
+            let zone_reply =
+                merge_bcm_for_message(ctx, BcmMessage::RightTurnRequestObserved(*on), bcm_ingress);
+            next.bcm = zone_reply.ctx;
+            outcomes.extend(zone_reply.outcomes.into_iter().map(ZoneOutcome::Bcm));
+        }
         FsmEvent::HazardButtonChanged(on) => {
             next.sccm.hazard_button_on = *on;
             let zone_reply =
@@ -215,6 +257,11 @@ pub fn zone_turn(
         }
         FsmEvent::PowerOn | FsmEvent::PowerOff | FsmEvent::Internal(_) => {}
         FsmEvent::AssemblyZoneReady(assembly_id) => match assembly_id {
+            AssemblyId::Sccm => {
+                if let Some(reply) = sccm_ingress {
+                    next.sccm = reply.ctx.clone();
+                }
+            }
             AssemblyId::Bcm => {
                 if let Some(reply) = bcm_ingress {
                     next.bcm = reply.ctx.clone();

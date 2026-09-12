@@ -204,6 +204,7 @@ pub enum TwinMessage {
 /// Generic zone tell-back envelope — wraps zone-specific reply types.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ZoneReply {
+    Sccm(crate::vehicle_state::SccmZoneReply),
     Bcm(crate::vehicle_state::BcmZoneReply),
     Headlamp(crate::vehicle_state::HeadlampZoneReply),
     /// wiper zone reply.
@@ -214,10 +215,29 @@ impl ZoneReply {
     pub(crate) fn matches_assembly(&self, assembly_id: crate::fsm::AssemblyId) -> bool {
         matches!(
             (self, assembly_id),
-            (Self::Bcm(_), crate::fsm::AssemblyId::Bcm)
+            (Self::Sccm(_), crate::fsm::AssemblyId::Sccm)
+                | (Self::Bcm(_), crate::fsm::AssemblyId::Bcm)
                 | (Self::Headlamp(_), crate::fsm::AssemblyId::Headlamp)
                 | (Self::Wiper(_), crate::fsm::AssemblyId::Wiper)
         )
+    }
+
+    pub fn disposition(&self) -> crate::vehicle_state::ObservationDisposition {
+        match self {
+            Self::Sccm(reply) => reply.disposition,
+            Self::Bcm(reply) => reply.disposition,
+            Self::Headlamp(_) | Self::Wiper(_) => {
+                crate::vehicle_state::ObservationDisposition::Lifecycle
+            }
+        }
+    }
+
+    pub fn as_sccm(&self) -> Option<&crate::vehicle_state::SccmZoneReply> {
+        if let ZoneReply::Sccm(r) = self {
+            Some(r)
+        } else {
+            None
+        }
     }
 
     pub fn as_bcm(&self) -> Option<&crate::vehicle_state::BcmZoneReply> {
@@ -255,6 +275,7 @@ impl ZoneReply {
 /// `pub(crate)` — not part of the external crate API.
 #[derive(Debug, Clone)]
 pub(crate) enum ZoneMessage {
+    Sccm(crate::vehicle_state::SccmMessage),
     Bcm(crate::vehicle_state::BcmMessage),
     Headlamp(crate::vehicle_state::HeadlampMessage),
     Wiper(crate::vehicle_state::WiperMessage),

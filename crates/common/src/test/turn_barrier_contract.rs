@@ -154,8 +154,8 @@ async fn spawn_silent(
 }
 
 /// First turn ID available to user-driven events after `boot_silent`.
-/// PowerOn=1, BCM startup=2, first user event=3.
-const FIRST_USER_TURN: u64 = 3;
+/// PowerOn=1, SCCM startup=2, BCM startup=3, first user event=4.
+const FIRST_USER_TURN: u64 = 4;
 
 /// Boot sequence with BCM as the sole lifecycle participant.
 async fn boot_silent(
@@ -169,7 +169,7 @@ async fn boot_silent(
         std::time::Duration::from_millis(500),
     )
     .await;
-    drain_n(rx, 2, std::time::Duration::from_secs(3)).await;
+    drain_n(rx, 3, std::time::Duration::from_secs(3)).await;
 }
 
 #[tokio::test]

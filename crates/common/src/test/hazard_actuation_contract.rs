@@ -93,10 +93,11 @@ async fn changed_hazard_commands_are_deduplicated_without_consuming_correlation_
 
     power_on_to_idle(&controller).await;
     let _power_on = transition_rx.recv().await.expect("power-on record");
+    let _sccm_ready = transition_rx.recv().await.expect("SCCM-ready record");
     let _bcm_ready = transition_rx.recv().await.expect("BCM-ready record");
 
     controller
-        .submit_fsm_event(FsmEvent::HazardButtonChanged(true))
+        .submit_fsm_event(FsmEvent::HazardButtonObserved(true))
         .await
         .expect("hazard on");
     let on_record = tokio::time::timeout(Duration::from_millis(500), transition_rx.recv())
@@ -107,39 +108,26 @@ async fn changed_hazard_commands_are_deduplicated_without_consuming_correlation_
         on_record.event,
         PublishedFsmEvent::HazardButtonChanged(true)
     );
-    let on_command = tokio::time::timeout(Duration::from_millis(500), actuation_rx.recv())
-        .await
-        .expect("hazard-on command timeout")
-        .expect("actuation channel closed");
-    assert_eq!(
-        on_command,
-        ActuationCommand::SetTurnLights {
-            correlation_id: CorrelationId {
-                source_id: "HAZARD-ACTUATION".into(),
-                session_id: match &on_command {
-                    ActuationCommand::SetTurnLights { correlation_id, .. } => {
-                        correlation_id.session_id
-                    }
-                    _ => unreachable!(),
-                },
-                sequence_no: 1,
-            },
-            left_on: true,
-            right_on: true,
-        }
+    assert!(
+        on_record.current_ctx.sccm.hazard_button_on,
+        "published ledger must mirror the observed SCCM value"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), actuation_rx.recv())
+            .await
+            .is_err(),
+        "observed hazard must not emit SetTurnLights"
     );
 
     controller
-        .submit_fsm_event(FsmEvent::HazardButtonChanged(true))
+        .submit_fsm_event(FsmEvent::HazardButtonObserved(true))
         .await
         .expect("duplicate hazard on");
-    let duplicate_record = tokio::time::timeout(Duration::from_millis(500), transition_rx.recv())
-        .await
-        .expect("duplicate hazard record timeout")
-        .expect("transition channel closed");
-    assert_eq!(
-        duplicate_record.event,
-        PublishedFsmEvent::HazardButtonChanged(true)
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), transition_rx.recv())
+            .await
+            .is_err(),
+        "duplicate observed hazard must not emit a record"
     );
     assert!(
         tokio::time::timeout(Duration::from_millis(50), actuation_rx.recv())
@@ -149,7 +137,7 @@ async fn changed_hazard_commands_are_deduplicated_without_consuming_correlation_
     );
 
     controller
-        .submit_fsm_event(FsmEvent::HazardButtonChanged(false))
+        .submit_fsm_event(FsmEvent::HazardButtonObserved(false))
         .await
         .expect("hazard off");
     let off_record = tokio::time::timeout(Duration::from_millis(500), transition_rx.recv())
@@ -160,24 +148,18 @@ async fn changed_hazard_commands_are_deduplicated_without_consuming_correlation_
         off_record.event,
         PublishedFsmEvent::HazardButtonChanged(false)
     );
-    let off_command = tokio::time::timeout(Duration::from_millis(500), actuation_rx.recv())
-        .await
-        .expect("hazard-off command timeout")
-        .expect("actuation channel closed");
-    assert!(matches!(
-        off_command,
-        ActuationCommand::SetTurnLights {
-            correlation_id: CorrelationId { sequence_no: 2, .. },
-            left_on: false,
-            right_on: false,
-        }
-    ));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), actuation_rx.recv())
+            .await
+            .is_err(),
+        "observed hazard off must not emit SetTurnLights"
+    );
 }
 
 #[tokio::test]
-async fn saturated_transition_channel_retains_every_accepted_duplicate_hazard_record() {
+async fn saturated_transition_channel_does_not_retain_duplicate_observed_hazard_rows() {
     const DUPLICATES: usize = 32;
-    let (transition_tx, mut transition_rx) = mpsc::channel(2);
+    let (transition_tx, mut transition_rx) = mpsc::channel(8);
     let options = VehicleControllerRuntimeOptions {
         transition_tx: Some(transition_tx),
         ..Default::default()
@@ -191,36 +173,28 @@ async fn saturated_transition_channel_retains_every_accepted_duplicate_hazard_re
         handle,
     };
 
-    controller.send_power_on().await.expect("power on");
+    power_on_to_idle(&controller).await;
     transition_rx.recv().await.expect("power-on record");
+    transition_rx.recv().await.expect("SCCM-ready record");
     transition_rx.recv().await.expect("BCM-ready record");
 
     for _ in 0..DUPLICATES {
         controller
-            .submit_fsm_event(FsmEvent::HazardButtonChanged(true))
+            .submit_fsm_event(FsmEvent::HazardButtonObserved(true))
             .await
             .expect("duplicate hazard accepted");
     }
 
-    let mut records = Vec::with_capacity(DUPLICATES);
-    for _ in 0..DUPLICATES {
-        records.push(
-            tokio::time::timeout(Duration::from_millis(500), transition_rx.recv())
-                .await
-                .expect("accepted duplicate record was lost under saturation")
-                .expect("transition channel closed"),
-        );
-    }
+    let initial = tokio::time::timeout(Duration::from_millis(500), transition_rx.recv())
+        .await
+        .expect("initial observed record timeout")
+        .expect("transition channel closed");
+    assert_eq!(initial.event, PublishedFsmEvent::HazardButtonChanged(true));
     assert!(
-        records
-            .iter()
-            .all(|record| record.event == PublishedFsmEvent::HazardButtonChanged(true))
-    );
-    assert!(
-        records
-            .windows(2)
-            .all(|pair| pair[1].record_seq == pair[0].record_seq + 1),
-        "backpressure must preserve actor record ordering"
+        tokio::time::timeout(Duration::from_millis(50), transition_rx.recv())
+            .await
+            .is_err(),
+        "duplicate observed hazards must not leave ledger rows"
     );
 }
 
@@ -244,13 +218,19 @@ async fn stalled_transition_consumer_backpressures_actor_until_capacity_is_relea
 
     controller.send_power_on().await.expect("power on");
     transition_rx.recv().await.expect("power-on record");
+    transition_rx.recv().await.expect("SCCM-ready record");
     transition_rx.recv().await.expect("BCM-ready record");
+    crate::test::wait_fsm_state(&controller, FsmState::Idle, Duration::from_millis(250)).await;
 
-    for _ in 0..3 {
+    for event in [
+        FsmEvent::HazardButtonObserved(true),
+        FsmEvent::HazardButtonObserved(false),
+        FsmEvent::HazardButtonObserved(true),
+    ] {
         controller
-            .submit_fsm_event(FsmEvent::HazardButtonChanged(true))
+            .submit_fsm_event(event)
             .await
-            .expect("submit duplicate hazard");
+            .expect("submit changed hazard");
     }
     tokio::task::yield_now().await;
 
@@ -264,15 +244,15 @@ async fn stalled_transition_consumer_backpressures_actor_until_capacity_is_relea
         "a detached queue incorrectly lets state advance past bounded record capacity"
     );
 
-    let first = transition_rx.recv().await.expect("first duplicate record");
+    let first = transition_rx.recv().await.expect("first changed record");
     let snapshot = controller
         .get_snapshot(Some(Duration::from_millis(250)))
         .await
         .expect("actor must resume once bounded capacity is released");
-    assert_eq!(snapshot.as_of_seq(), 5);
+    assert_eq!(snapshot.as_of_seq(), 6);
 
-    let second = transition_rx.recv().await.expect("second duplicate record");
-    let third = transition_rx.recv().await.expect("third duplicate record");
+    let second = transition_rx.recv().await.expect("second changed record");
+    let third = transition_rx.recv().await.expect("third changed record");
     assert_eq!(second.record_seq, first.record_seq + 1);
     assert_eq!(third.record_seq, second.record_seq + 1);
 }

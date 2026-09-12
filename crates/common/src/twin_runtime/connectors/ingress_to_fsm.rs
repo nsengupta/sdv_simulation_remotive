@@ -2,7 +2,7 @@ use super::projection::{ProjectionError, Projector};
 use crate::digital_twin::TwinMessage;
 use crate::domain_types::TwinIngressEvent;
 use crate::fsm::{FrontHeadlampIncompleteCause, FrontHeadlampSwitchDirection, FsmEvent};
-use crate::signals::{ControlSignal, LifecycleCommand, VssSignal};
+use crate::signals::{ControlSignal, LifecycleCommand, ObservedEcuSignal, VssSignal};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct IngressToFsmProjector;
@@ -14,6 +14,15 @@ impl Projector<TwinIngressEvent, TwinMessage> for IngressToFsmProjector {
             TwinIngressEvent::Lifecycle(LifecycleCommand::PowerOff) => FsmEvent::PowerOff,
             TwinIngressEvent::Control(ControlSignal::HazardButton(pressed)) => {
                 FsmEvent::HazardButtonChanged(pressed)
+            }
+            TwinIngressEvent::ObservedEcu(ObservedEcuSignal::HazardButton(pressed)) => {
+                FsmEvent::HazardButtonObserved(pressed)
+            }
+            TwinIngressEvent::ObservedEcu(ObservedEcuSignal::LeftTurnRequest(pressed)) => {
+                FsmEvent::LeftTurnRequestObserved(pressed)
+            }
+            TwinIngressEvent::ObservedEcu(ObservedEcuSignal::RightTurnRequest(pressed)) => {
+                FsmEvent::RightTurnRequestObserved(pressed)
             }
             TwinIngressEvent::Telemetry(vss) => match vss {
                 VssSignal::Speed(_) => {

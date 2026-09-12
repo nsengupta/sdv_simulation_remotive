@@ -1,7 +1,7 @@
 use remotivelabs_broker::generated::base::signal::Payload;
 
-/// Decode only the broker encodings admitted by the Phase I hazard contract.
-pub fn decode_hazard(payload: Option<&Payload>) -> Option<bool> {
+/// Decode only the broker encodings admitted by the observed boolean-signal contract.
+pub fn decode_boolean(payload: Option<&Payload>) -> Option<bool> {
     match payload? {
         Payload::Integer(0) | Payload::Uinteger64(0) => Some(false),
         Payload::Integer(1) | Payload::Uinteger64(1) => Some(true),

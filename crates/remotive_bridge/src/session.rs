@@ -1,6 +1,8 @@
-use crate::source::{HazardConnector, HazardRead, HazardSource, RpmSource, ShutdownSource};
+use crate::source::{
+    BrokerObservation, ObservationConnector, ObservationSource, RpmSource, ShutdownSource,
+};
 use anyhow::{Context, Result, anyhow};
-use common::{ControlSignal, LifecycleCommand, VssSignal};
+use common::{LifecycleCommand, ObservedEcuSignal, VssSignal};
 use emulator::runner::controlled_stop;
 use emulator::sink::FrameSink;
 use std::num::NonZeroUsize;
@@ -11,7 +13,7 @@ pub struct SessionConfig {
 }
 
 enum SessionEvent {
-    Hazard(Result<HazardRead>),
+    Observation(Result<BrokerObservation>),
     Rpm(Result<u16>),
     Shutdown(Result<()>),
 }
@@ -25,25 +27,25 @@ pub async fn run_connected_session<S, C, R, Stop>(
 ) -> Result<()>
 where
     S: FrameSink,
-    C: HazardConnector,
+    C: ObservationConnector,
     R: RpmSource,
     Stop: ShutdownSource,
 {
-    let mut hazards = connector.connect().await?;
-    run_session(sink, &mut hazards, rpm, shutdown, config).await
+    let mut observations = connector.connect().await?;
+    run_session(sink, &mut observations, rpm, shutdown, config).await
 }
 
 /// Own the complete bridge write order through one mutable sink.
-pub async fn run_session<S, H, R, Stop>(
+pub async fn run_session<S, O, R, Stop>(
     sink: &mut S,
-    hazards: &mut H,
+    observations: &mut O,
     rpm: &mut R,
     shutdown: &mut Stop,
     config: SessionConfig,
 ) -> Result<()>
 where
     S: FrameSink,
-    H: HazardSource,
+    O: ObservationSource,
     R: RpmSource,
     Stop: ShutdownSource,
 {
@@ -53,16 +55,24 @@ where
     let mut readings = 0usize;
     let mut next_priority = 0u8;
     let terminal_error = loop {
-        let event = next_session_event(next_priority, hazards, rpm, shutdown).await;
+        let event = next_session_event(next_priority, observations, rpm, shutdown).await;
         next_priority = (next_priority + 1) % 3;
 
         match event {
-            SessionEvent::Hazard(hazard) => match hazard {
-                Ok(HazardRead::Value(pressed)) => {
-                    sink.write_frame(ControlSignal::HazardButton(pressed).to_can_frame()?)
-                        .map_err(|error| anyhow!("write hazard frame: {error}"))?;
+            SessionEvent::Observation(observation) => match observation {
+                Ok(BrokerObservation::HazardButton(value)) => {
+                    sink.write_frame(ObservedEcuSignal::HazardButton(value).to_can_frame()?)
+                        .map_err(|error| anyhow!("write hazard observation frame: {error}"))?;
                 }
-                Ok(HazardRead::End) => break Some(anyhow!("broker stream ended")),
+                Ok(BrokerObservation::LeftTurnRequest(value)) => {
+                    sink.write_frame(ObservedEcuSignal::LeftTurnRequest(value).to_can_frame()?)
+                        .map_err(|error| anyhow!("write left-turn observation frame: {error}"))?;
+                }
+                Ok(BrokerObservation::RightTurnRequest(value)) => {
+                    sink.write_frame(ObservedEcuSignal::RightTurnRequest(value).to_can_frame()?)
+                        .map_err(|error| anyhow!("write right-turn observation frame: {error}"))?;
+                }
+                Ok(BrokerObservation::End) => break Some(anyhow!("broker stream ended")),
                 Err(error) => break Some(error.context("broker stream failed")),
             },
             SessionEvent::Rpm(next_rpm) => {
@@ -83,7 +93,7 @@ where
             }
         }
 
-        // A broker batch can keep `next_hazard` immediately ready. Yield so timers and the
+        // A broker batch can keep `next_observation` immediately ready. Yield so timers and the
         // Ctrl+C driver can become ready before the next bounded-priority selection.
         tokio::task::yield_now().await;
     };
@@ -96,14 +106,14 @@ where
     }
 }
 
-async fn next_session_event<H, R, Stop>(
+async fn next_session_event<O, R, Stop>(
     priority: u8,
-    hazards: &mut H,
+    observations: &mut O,
     rpm: &mut R,
     shutdown: &mut Stop,
 ) -> SessionEvent
 where
-    H: HazardSource,
+    O: ObservationSource,
     R: RpmSource,
     Stop: ShutdownSource,
 {
@@ -111,7 +121,7 @@ where
         0 => {
             tokio::select! {
                 biased;
-                value = hazards.next_hazard() => SessionEvent::Hazard(value),
+                value = observations.next_observation() => SessionEvent::Observation(value),
                 value = rpm.next_rpm() => SessionEvent::Rpm(value),
                 value = shutdown.wait() => SessionEvent::Shutdown(value),
             }
@@ -121,14 +131,14 @@ where
                 biased;
                 value = rpm.next_rpm() => SessionEvent::Rpm(value),
                 value = shutdown.wait() => SessionEvent::Shutdown(value),
-                value = hazards.next_hazard() => SessionEvent::Hazard(value),
+                value = observations.next_observation() => SessionEvent::Observation(value),
             }
         }
         _ => {
             tokio::select! {
                 biased;
                 value = shutdown.wait() => SessionEvent::Shutdown(value),
-                value = hazards.next_hazard() => SessionEvent::Hazard(value),
+                value = observations.next_observation() => SessionEvent::Observation(value),
                 value = rpm.next_rpm() => SessionEvent::Rpm(value),
             }
         }

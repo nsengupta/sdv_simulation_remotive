@@ -1,6 +1,7 @@
-use crate::decoder::decode_hazard;
+use crate::decoder::decode_boolean;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use common::RPM_DRIVING_THRESHOLD;
 use emulator::models::{PhysicalWorldModelConfig, RpmModel};
 use remotivelabs_broker::{
     Connection,
@@ -15,9 +16,15 @@ use tonic::Streaming;
 pub const CLIENT_ID: &str = "sdv-remotive-bridge";
 pub const HAZARD_NAMESPACE: &str = "SCCM-DriverCan0";
 pub const HAZARD_NAME: &str = "HazardLightButton.HazardLightButton";
+pub const TURN_NAMESPACE: &str = "BCM-BodyCan0";
+pub const LEFT_TURN_NAME: &str = "TurnLightControl.LeftTurnLightRequest";
+pub const RIGHT_TURN_NAME: &str = "TurnLightControl.RightTurnLightRequest";
 
 pub fn subscription_ready_status() -> String {
-    format!("[remotive_bridge] connected; subscribed signal={HAZARD_NAMESPACE}:{HAZARD_NAME}")
+    format!(
+        "[remotive_bridge] connected; subscribed signals={HAZARD_NAMESPACE}:{HAZARD_NAME},\
+{TURN_NAMESPACE}:{LEFT_TURN_NAME},{TURN_NAMESPACE}:{RIGHT_TURN_NAME}"
+    )
 }
 
 pub fn subscription_config() -> SubscriberConfig {
@@ -26,12 +33,19 @@ pub fn subscription_config() -> SubscriberConfig {
             id: CLIENT_ID.to_owned(),
         }),
         signals: Some(SignalIds {
-            signal_id: vec![SignalId {
-                name: HAZARD_NAME.to_owned(),
+            signal_id: [
+                (HAZARD_NAMESPACE, HAZARD_NAME),
+                (TURN_NAMESPACE, LEFT_TURN_NAME),
+                (TURN_NAMESPACE, RIGHT_TURN_NAME),
+            ]
+            .into_iter()
+            .map(|(namespace, name)| SignalId {
+                name: name.to_owned(),
                 namespace: Some(NameSpace {
-                    name: HAZARD_NAMESPACE.to_owned(),
+                    name: namespace.to_owned(),
                 }),
-            }],
+            })
+            .collect(),
         }),
         on_change: false,
         initial_empty: false,
@@ -39,18 +53,20 @@ pub fn subscription_config() -> SubscriberConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HazardRead {
-    Value(bool),
+pub enum BrokerObservation {
+    HazardButton(bool),
+    LeftTurnRequest(bool),
+    RightTurnRequest(bool),
     End,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct HazardRejectCounters {
+pub struct ObservationRejectCounters {
     wrong_identity: u64,
     invalid_payload: u64,
 }
 
-impl HazardRejectCounters {
+impl ObservationRejectCounters {
     pub fn wrong_identity(&self) -> u64 {
         self.wrong_identity
     }
@@ -66,7 +82,7 @@ impl HazardRejectCounters {
 
     fn reject_payload(&mut self) {
         self.invalid_payload = self.invalid_payload.saturating_add(1);
-        report_rejection_count("invalid hazard payload", self.invalid_payload);
+        report_rejection_count("invalid observation payload", self.invalid_payload);
     }
 }
 
@@ -76,27 +92,31 @@ fn report_rejection_count(reason: &str, count: u64) {
     }
 }
 
-fn has_hazard_identity(signal: &Signal) -> bool {
-    signal.id.as_ref().is_some_and(|id| {
-        id.name == HAZARD_NAME
-            && id
-                .namespace
-                .as_ref()
-                .is_some_and(|namespace| namespace.name == HAZARD_NAMESPACE)
-    })
+fn observation_kind(signal: &Signal) -> Option<fn(bool) -> BrokerObservation> {
+    let id = signal.id.as_ref()?;
+    let namespace = id.namespace.as_ref()?.name.as_str();
+    match (namespace, id.name.as_str()) {
+        (HAZARD_NAMESPACE, HAZARD_NAME) => Some(BrokerObservation::HazardButton),
+        (TURN_NAMESPACE, LEFT_TURN_NAME) => Some(BrokerObservation::LeftTurnRequest),
+        (TURN_NAMESPACE, RIGHT_TURN_NAME) => Some(BrokerObservation::RightTurnRequest),
+        _ => None,
+    }
 }
 
-pub fn decode_hazard_signals(signals: &Signals, rejected: &mut HazardRejectCounters) -> Vec<bool> {
+pub fn decode_observation_signals(
+    signals: &Signals,
+    rejected: &mut ObservationRejectCounters,
+) -> Vec<BrokerObservation> {
     signals
         .signal
         .iter()
         .filter_map(|signal| {
-            if !has_hazard_identity(signal) {
+            let Some(build) = observation_kind(signal) else {
                 rejected.reject_identity();
                 return None;
-            }
-            match decode_hazard(signal.payload.as_ref()) {
-                Some(value) => Some(value),
+            };
+            match decode_boolean(signal.payload.as_ref()) {
+                Some(value) => Some(build(value)),
                 None => {
                     rejected.reject_payload();
                     None
@@ -107,13 +127,13 @@ pub fn decode_hazard_signals(signals: &Signals, rejected: &mut HazardRejectCount
 }
 
 #[async_trait]
-pub trait HazardSource {
-    async fn next_hazard(&mut self) -> Result<HazardRead>;
+pub trait ObservationSource {
+    async fn next_observation(&mut self) -> Result<BrokerObservation>;
 }
 
 #[async_trait]
-pub trait HazardConnector {
-    type Source: HazardSource;
+pub trait ObservationConnector {
+    type Source: ObservationSource;
 
     async fn connect(self) -> Result<Self::Source>;
 }
@@ -128,14 +148,14 @@ pub trait ShutdownSource {
     async fn wait(&mut self) -> Result<()>;
 }
 
-pub struct RemotiveHazardSource {
+pub struct RemotiveObservationSource {
     stream: Streaming<Signals>,
-    pending: VecDeque<bool>,
-    rejected: HazardRejectCounters,
+    pending: VecDeque<BrokerObservation>,
+    rejected: ObservationRejectCounters,
 }
 
-impl RemotiveHazardSource {
-    /// Connect and establish the subscription before any lifecycle frame is emitted.
+impl RemotiveObservationSource {
+    /// Connect and establish all subscriptions before any lifecycle frame is emitted.
     pub async fn connect(url: String) -> Result<Self> {
         let mut connection = Connection::new(url, None)
             .await
@@ -144,14 +164,30 @@ impl RemotiveHazardSource {
             .network_stub
             .subscribe_to_signals(subscription_config())
             .await
-            .context("establish Remotive hazard subscription")?
+            .context("establish Remotive observation subscription")?
             .into_inner();
         eprintln!("{}", subscription_ready_status());
         Ok(Self {
             stream,
             pending: VecDeque::new(),
-            rejected: HazardRejectCounters::default(),
+            rejected: ObservationRejectCounters::default(),
         })
+    }
+}
+
+#[async_trait]
+impl ObservationSource for RemotiveObservationSource {
+    async fn next_observation(&mut self) -> Result<BrokerObservation> {
+        loop {
+            if let Some(observation) = self.pending.pop_front() {
+                return Ok(observation);
+            }
+            let Some(signals) = self.stream.message().await.context("broker stream error")? else {
+                return Ok(BrokerObservation::End);
+            };
+            self.pending
+                .extend(decode_observation_signals(&signals, &mut self.rejected));
+        }
     }
 }
 
@@ -160,27 +196,11 @@ pub struct RemotiveConnector {
 }
 
 #[async_trait]
-impl HazardConnector for RemotiveConnector {
-    type Source = RemotiveHazardSource;
+impl ObservationConnector for RemotiveConnector {
+    type Source = RemotiveObservationSource;
 
     async fn connect(self) -> Result<Self::Source> {
-        RemotiveHazardSource::connect(self.url).await
-    }
-}
-
-#[async_trait]
-impl HazardSource for RemotiveHazardSource {
-    async fn next_hazard(&mut self) -> Result<HazardRead> {
-        loop {
-            if let Some(value) = self.pending.pop_front() {
-                return Ok(HazardRead::Value(value));
-            }
-            let Some(signals) = self.stream.message().await.context("broker stream error")? else {
-                return Ok(HazardRead::End);
-            };
-            self.pending
-                .extend(decode_hazard_signals(&signals, &mut self.rejected));
-        }
+        RemotiveObservationSource::connect(self.url).await
     }
 }
 
@@ -210,7 +230,10 @@ impl RpmSource for ProfileRpmSource {
             .duration_since(UNIX_EPOCH)
             .context("system clock is before Unix epoch")?
             .as_secs();
-        self.current_rpm = self.model.next_rpm(self.current_rpm, epoch);
+        self.current_rpm = self
+            .model
+            .next_rpm(self.current_rpm, epoch)
+            .min(RPM_DRIVING_THRESHOLD);
         Ok(self.current_rpm)
     }
 }

@@ -35,9 +35,10 @@ async fn given_actor_driving_in_dark_when_ack_wait_elapses_without_timer_tick_th
         handle,
     };
 
-    // bridge to Idle, drain BCM-only startup rows.
+    // bridge to Idle, drain active startup rows.
     power_on_to_idle(&controller).await;
     let _ = rx.recv().await.expect("power on → preparing row");
+    let _ = rx.recv().await.expect("SCCM zone ready row");
     let _ = rx.recv().await.expect("BCM zone ready → idle row");
 
     submit_daylight_ambient(&controller).await;
@@ -109,9 +110,10 @@ async fn given_actor_on_requested_when_ack_before_deadline_then_no_spontaneous_i
         handle,
     };
 
-    // bridge to Idle, drain BCM-only startup rows.
+    // bridge to Idle, drain active startup rows.
     power_on_to_idle(&controller).await;
     let _ = rx.recv().await.expect("power on → preparing row");
+    let _ = rx.recv().await.expect("SCCM zone ready row");
     let _ = rx.recv().await.expect("BCM zone ready → idle row");
 
     controller

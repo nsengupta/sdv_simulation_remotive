@@ -14,7 +14,7 @@ pub use crate::twin_runtime::controller::{
 // --- Canonical twin ingress vocabulary ---
 
 pub use crate::domain_types::{TwinIngressEvent, VehicleState};
-pub use crate::signals::{ControlSignal, LifecycleCommand, VssSignal};
+pub use crate::signals::{ControlSignal, LifecycleCommand, ObservedEcuSignal, VssSignal};
 
 // --- Read model (snapshots + observable assembly state) ---
 

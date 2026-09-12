@@ -1,4 +1,6 @@
-use common::facade::{ControlSignal, LifecycleCommand, TwinIngressEvent, VssSignal};
+use common::facade::{
+    ControlSignal, LifecycleCommand, ObservedEcuSignal, TwinIngressEvent, VssSignal,
+};
 use socketcan::CanFrame;
 
 /// Decode a generic CAN frame into the canonical, transport-independent twin ingress vocabulary.
@@ -8,6 +10,10 @@ use socketcan::CanFrame;
 pub fn can_frame_to_twin_ingress(frame: &CanFrame) -> Option<TwinIngressEvent> {
     if let Some(command) = LifecycleCommand::from_can_frame(frame) {
         return Some(TwinIngressEvent::Lifecycle(command));
+    }
+
+    if let Some(observed) = ObservedEcuSignal::from_can_frame(frame) {
+        return Some(TwinIngressEvent::ObservedEcu(observed));
     }
 
     if let Some(control) = ControlSignal::from_can_frame(frame) {
@@ -25,7 +31,10 @@ pub fn can_frame_to_twin_ingress(frame: &CanFrame) -> Option<TwinIngressEvent> {
 #[cfg(test)]
 mod tests {
     use super::can_frame_to_twin_ingress;
-    use common::facade::{ControlSignal, LifecycleCommand, TwinIngressEvent, VssSignal};
+    use common::facade::{
+        ControlSignal, LifecycleCommand, ObservedEcuSignal, TwinIngressEvent, VssSignal,
+    };
+    use socketcan::{CanFrame, EmbeddedFrame, StandardId};
 
     #[test]
     fn lifecycle_power_on_frame_maps_to_twin_ingress() {
@@ -64,17 +73,64 @@ mod tests {
     }
 
     #[test]
-    fn hazard_button_frames_map_to_twin_control() {
-        for pressed in [false, true] {
-            let frame = ControlSignal::HazardButton(pressed)
-                .to_can_frame()
-                .expect("encode hazard button");
+    fn observed_hazard_button_frame_maps_to_twin_observed_ecu() {
+        let frame = ObservedEcuSignal::HazardButton(true)
+            .to_can_frame()
+            .expect("encode observed hazard");
 
-            assert!(matches!(
-                can_frame_to_twin_ingress(&frame),
-                Some(TwinIngressEvent::Control(ControlSignal::HazardButton(actual)))
-                    if actual == pressed
-            ));
+        assert!(matches!(
+            can_frame_to_twin_ingress(&frame),
+            Some(TwinIngressEvent::ObservedEcu(
+                ObservedEcuSignal::HazardButton(true)
+            ))
+        ));
+        assert!(!matches!(
+            can_frame_to_twin_ingress(&frame),
+            Some(TwinIngressEvent::Control(ControlSignal::HazardButton(_)))
+        ));
+    }
+
+    #[test]
+    fn observed_left_turn_request_frame_maps_to_twin_observed_ecu() {
+        let frame = ObservedEcuSignal::LeftTurnRequest(true)
+            .to_can_frame()
+            .expect("encode observed left request");
+
+        assert!(matches!(
+            can_frame_to_twin_ingress(&frame),
+            Some(TwinIngressEvent::ObservedEcu(
+                ObservedEcuSignal::LeftTurnRequest(true)
+            ))
+        ));
+    }
+
+    #[test]
+    fn observed_right_turn_request_frame_maps_to_twin_observed_ecu() {
+        let frame = ObservedEcuSignal::RightTurnRequest(false)
+            .to_can_frame()
+            .expect("encode observed right request");
+
+        assert!(matches!(
+            can_frame_to_twin_ingress(&frame),
+            Some(TwinIngressEvent::ObservedEcu(
+                ObservedEcuSignal::RightTurnRequest(false)
+            ))
+        ));
+    }
+
+    #[test]
+    fn malformed_observed_ids_and_dlcs_are_not_twin_ingress() {
+        let unknown = CanFrame::new(StandardId::new(0x7ff).unwrap(), &[1, 0]).unwrap();
+        assert!(can_frame_to_twin_ingress(&unknown).is_none());
+
+        for id in [0x105, 0x106, 0x107] {
+            for data in [&[][..], &[1][..], &[1, 0, 0][..], &[2, 0][..], &[1, 1][..]] {
+                let frame = CanFrame::new(StandardId::new(id).unwrap(), data).unwrap();
+                assert!(
+                    can_frame_to_twin_ingress(&frame).is_none(),
+                    "id={id:#x} data={data:?} must not decode"
+                );
+            }
         }
     }
 
@@ -92,8 +148,6 @@ mod tests {
 
     #[test]
     fn unknown_frame_is_not_twin_ingress() {
-        use socketcan::{CanFrame, EmbeddedFrame, StandardId};
-
         let frame = CanFrame::new(StandardId::new(0x7ff).unwrap(), &[0; 8]).unwrap();
         assert!(can_frame_to_twin_ingress(&frame).is_none());
     }

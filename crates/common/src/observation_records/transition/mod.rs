@@ -199,6 +199,11 @@ impl From<&FsmEvent> for PublishedFsmEvent {
             FsmEvent::PowerOff => Self::PowerOff,
             FsmEvent::UpdateRpm(rpm) => Self::UpdateRpm(*rpm),
             FsmEvent::HazardButtonChanged(pressed) => Self::HazardButtonChanged(*pressed),
+            // Phase II published observed variants arrive in Task 4.
+            FsmEvent::HazardButtonObserved(pressed) => Self::HazardButtonChanged(*pressed),
+            FsmEvent::LeftTurnRequestObserved(_) | FsmEvent::RightTurnRequestObserved(_) => {
+                Self::TimerTick
+            }
             FsmEvent::UpdateAmbientLux(lux) => Self::UpdateAmbientLux(*lux),
             FsmEvent::FrontHeadlampOnAck => Self::FrontHeadlampOnAck,
             FsmEvent::FrontHeadlampOffAck => Self::FrontHeadlampOffAck,

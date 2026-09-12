@@ -72,11 +72,10 @@ async fn given_low_lux_and_on_ack_when_get_status_then_ledger_headlamp_matches_e
         handle,
     };
 
-    // BCM-only startup drains two rows.
-    // row 1 = PowerOn → PreparingToStart
-    // row 2 = AssemblyZoneReady(Bcm) → Idle
+    // Active startup drains three rows: PowerOn, SCCM ready, BCM ready → Idle.
     power_on_to_idle(&controller).await;
     let _power_on_record = rx.recv().await.expect("ledger row for power on");
+    let _ = rx.recv().await.expect("ledger row for SCCM zone ready");
     let _ = rx
         .recv()
         .await
@@ -154,11 +153,10 @@ async fn given_power_on_only_when_get_status_then_ledger_headlamp_matches_embed(
         handle,
     };
 
-    // BCM-only startup drains two rows.
-    // row 1 = PowerOn → PreparingToStart
-    // row 2 = AssemblyZoneReady(Bcm) → Idle
+    // Active startup drains three rows: PowerOn, SCCM ready, BCM ready → Idle.
     power_on_to_idle(&controller).await;
     let _power_on_record = rx.recv().await.expect("ledger row for power on");
+    let _sccm_ready_record = rx.recv().await.expect("ledger row for SCCM zone ready");
     let bcm_ready_record = rx
         .recv()
         .await

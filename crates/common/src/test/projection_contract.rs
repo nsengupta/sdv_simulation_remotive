@@ -3,7 +3,7 @@
 use crate::digital_twin::TwinMessage;
 use crate::fsm::FsmEvent;
 use crate::twin_runtime::connectors::{IngressToFsmProjector, ProjectionError, Projector};
-use crate::{ControlSignal, LifecycleCommand, TwinIngressEvent, VssSignal};
+use crate::{ControlSignal, LifecycleCommand, ObservedEcuSignal, TwinIngressEvent, VssSignal};
 
 #[test]
 fn canonical_twin_ingress_names_are_public_and_projectable() {
@@ -96,6 +96,52 @@ fn given_hazard_button_when_projected_then_maps_exact_state() {
             TwinMessage::Fsm(FsmEvent::HazardButtonChanged(actual)) if actual == pressed
         ));
     }
+}
+
+#[test]
+fn observed_hazard_projects_to_hazard_button_observed_not_changed() {
+    let out = IngressToFsmProjector
+        .project(TwinIngressEvent::ObservedEcu(
+            ObservedEcuSignal::HazardButton(true),
+        ))
+        .expect("observed hazard projection");
+
+    assert!(matches!(
+        out,
+        TwinMessage::Fsm(FsmEvent::HazardButtonObserved(true))
+    ));
+    assert!(!matches!(
+        out,
+        TwinMessage::Fsm(FsmEvent::HazardButtonChanged(_))
+    ));
+}
+
+#[test]
+fn observed_left_turn_projects_to_left_turn_request_observed() {
+    let out = IngressToFsmProjector
+        .project(TwinIngressEvent::ObservedEcu(
+            ObservedEcuSignal::LeftTurnRequest(true),
+        ))
+        .expect("observed left projection");
+
+    assert!(matches!(
+        out,
+        TwinMessage::Fsm(FsmEvent::LeftTurnRequestObserved(true))
+    ));
+}
+
+#[test]
+fn observed_right_turn_projects_to_right_turn_request_observed() {
+    let out = IngressToFsmProjector
+        .project(TwinIngressEvent::ObservedEcu(
+            ObservedEcuSignal::RightTurnRequest(false),
+        ))
+        .expect("observed right projection");
+
+    assert!(matches!(
+        out,
+        TwinMessage::Fsm(FsmEvent::RightTurnRequestObserved(false))
+    ));
 }
 
 #[test]

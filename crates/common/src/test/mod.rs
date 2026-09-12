@@ -17,7 +17,22 @@ mod actor_contract;
 mod bcm_contract;
 
 #[cfg(test)]
+mod sccm_observation_contract;
+
+#[cfg(test)]
+mod bcm_observation_contract;
+
+#[cfg(test)]
 mod bcm_actor_contract;
+
+#[cfg(test)]
+mod sccm_actor_contract;
+
+#[cfg(test)]
+mod observed_duplicate_contract;
+
+#[cfg(test)]
+mod observed_reorder_contract;
 
 #[cfg(test)]
 mod fsm_preparation_contract;
@@ -51,6 +66,9 @@ mod lifecycle_signal_contract;
 
 #[cfg(test)]
 mod hazard_signal_contract;
+
+#[cfg(test)]
+mod remotive_observed_signal_contract;
 
 #[cfg(test)]
 mod hazard_fsm_contract;

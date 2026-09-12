@@ -110,8 +110,9 @@ async fn given_silent_headlamp_when_headlamp_demux_event_then_ledger_records_unr
         std::time::Duration::from_millis(500),
     )
     .await;
-    // Drain PowerOn + AssemblyZoneReady(Bcm).
+    // Drain PowerOn + SCCM ready + BCM ready.
     let _ = rx.recv().await.expect("power on row");
+    let _ = rx.recv().await.expect("SCCM assembly zone ready row");
     let _ = rx.recv().await.expect("BCM assembly zone ready row");
 
     // Now the headlamp is still silent for operational tell-backs.
