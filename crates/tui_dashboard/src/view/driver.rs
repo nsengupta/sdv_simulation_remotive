@@ -1,10 +1,9 @@
 use super::{
-    MISSING, DriverIcon, LineRole, PaneLine, Segment, SegmentContent, SegmentStyle,
+    MISSING, LineRole, PaneLine, Segment, SegmentContent, SegmentStyle,
 };
 use common::DiagnosticRecord;
 use common::facade::{
-    DiagnosticKind, DiagnosticLevel, PublishedHeadlampState, PublishedTransitionRecord,
-    PublishedWiperState,
+    DiagnosticKind, DiagnosticLevel, PublishedObservedBool, PublishedTransitionRecord,
 };
 use common::fsm::FrontHeadlampIncompleteCause;
 use common::vehicle_physics::{
@@ -49,11 +48,39 @@ pub fn driver_pane(
         PaneLine::spacer(width),
         speed_pane_line(ledger, width),
         PaneLine::spacer(width),
-        visibility_pane_line(ledger, width),
+        observed_pane_line(
+            "Hazard: ",
+            ledger
+                .map(|row| row.current_ctx.sccm.hazard_button_on)
+                .unwrap_or(PublishedObservedBool::Unknown),
+            width,
+        ),
         PaneLine::spacer(width),
-        weather_pane_line(ledger, width),
+        observed_pane_line(
+            "Left request: ",
+            ledger
+                .map(|row| row.current_ctx.bcm.left_turn_request_on)
+                .unwrap_or(PublishedObservedBool::Unknown),
+            width,
+        ),
+        PaneLine::spacer(width),
+        observed_pane_line(
+            "Right request: ",
+            ledger
+                .map(|row| row.current_ctx.bcm.right_turn_request_on)
+                .unwrap_or(PublishedObservedBool::Unknown),
+            width,
+        ),
     ];
     DriverPane { lines }
+}
+
+fn format_observed_bool(value: PublishedObservedBool) -> &'static str {
+    match value {
+        PublishedObservedBool::Unknown => "UNKNOWN",
+        PublishedObservedBool::Off => "OFF",
+        PublishedObservedBool::On => "ON",
+    }
 }
 
 fn notice_pane_line(diagnostic: Option<&DiagnosticRecord>, width: usize) -> PaneLine {
@@ -208,109 +235,17 @@ fn speed_pane_line(ledger: Option<&PublishedTransitionRecord>, width: usize) -> 
     line.pad_to_width(width)
 }
 
-fn visibility_pane_line(ledger: Option<&PublishedTransitionRecord>, width: usize) -> PaneLine {
-    let Some(row) = ledger else {
-        let line = PaneLine {
-            role: LineRole::Visibility,
-            segments: vec![
-                Segment {
-                    style: SegmentStyle::Label,
-                    content: SegmentContent::Text("Visibility: ".to_owned()),
-                },
-                Segment {
-                    style: SegmentStyle::Default,
-                    content: SegmentContent::Text(format!("({MISSING})  Headlamps: {MISSING}")),
-                },
-            ],
-        };
-        return fit_or_pad(line, width);
-    };
-    let lux = row.current_ctx.visibility.ambient_lux;
-    let lux_icon = DriverIcon::for_ambient_lux(lux);
-    let mut headlamps = format_headlamp_state(row.current_ctx.headlamp.state).to_owned();
-    if row.current_ctx.headlamp.ack_pending_since.is_some() {
-        headlamps.push_str("; waiting for reply");
-    }
+fn observed_pane_line(label: &str, value: PublishedObservedBool, width: usize) -> PaneLine {
     let line = PaneLine {
         role: LineRole::Visibility,
         segments: vec![
             Segment {
                 style: SegmentStyle::Label,
-                content: SegmentContent::Text("Visibility: ".to_owned()),
+                content: SegmentContent::Text(label.to_owned()),
             },
             Segment {
                 style: SegmentStyle::Default,
-                content: SegmentContent::Icon(lux_icon),
-            },
-            Segment {
-                style: SegmentStyle::Default,
-                content: SegmentContent::Text(format!(" ({lux} lux)  Headlamps: {headlamps}")),
-            },
-        ],
-    };
-    fit_or_pad(line, width)
-}
-
-fn weather_pane_line(ledger: Option<&PublishedTransitionRecord>, width: usize) -> PaneLine {
-    let Some(row) = ledger else {
-        let line = PaneLine {
-            role: LineRole::Weather,
-            segments: vec![
-                Segment {
-                    style: SegmentStyle::Label,
-                    content: SegmentContent::Text("Weather: ".to_owned()),
-                },
-                Segment {
-                    style: SegmentStyle::Default,
-                    content: SegmentContent::Text(format!("{MISSING}  ")),
-                },
-                Segment {
-                    style: SegmentStyle::Label,
-                    content: SegmentContent::Text("Wipers: ".to_owned()),
-                },
-                Segment {
-                    style: SegmentStyle::Default,
-                    content: SegmentContent::Text(MISSING.to_owned()),
-                },
-            ],
-        };
-        return fit_or_pad(line, width);
-    };
-    let (rain_icon, rain_text) = if row.current_ctx.weather.raining {
-        (DriverIcon::Raining, " Raining")
-    } else {
-        (DriverIcon::Dry, " Sunny")
-    };
-    let (wiper_icon, wiper_text) = match row.current_ctx.wiper.state {
-        PublishedWiperState::Running => (DriverIcon::WiperOn, " moving"),
-        PublishedWiperState::Off | PublishedWiperState::Ready => (DriverIcon::WiperOff, " stopped"),
-    };
-    let line = PaneLine {
-        role: LineRole::Weather,
-        segments: vec![
-            Segment {
-                style: SegmentStyle::Label,
-                content: SegmentContent::Text("Weather: ".to_owned()),
-            },
-            Segment {
-                style: SegmentStyle::Default,
-                content: SegmentContent::Icon(rain_icon),
-            },
-            Segment {
-                style: SegmentStyle::Default,
-                content: SegmentContent::Text(rain_text.to_owned()),
-            },
-            Segment {
-                style: SegmentStyle::Label,
-                content: SegmentContent::Text("  Wipers: ".to_owned()),
-            },
-            Segment {
-                style: SegmentStyle::Default,
-                content: SegmentContent::Icon(wiper_icon),
-            },
-            Segment {
-                style: SegmentStyle::Default,
-                content: SegmentContent::Text(wiper_text.to_owned()),
+                content: SegmentContent::Text(format_observed_bool(value).to_owned()),
             },
         ],
     };
@@ -326,23 +261,15 @@ fn fit_or_pad(line: PaneLine, width: usize) -> PaneLine {
     }
 }
 
-fn format_headlamp_state(state: PublishedHeadlampState) -> &'static str {
-    match state {
-        PublishedHeadlampState::Off => "Off",
-        PublishedHeadlampState::Ready => "Ready",
-        PublishedHeadlampState::OnRequested => "On requested",
-        PublishedHeadlampState::On => "On",
-        PublishedHeadlampState::OffRequested => "Off requested",
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use common::facade::{
         PublishedBcmContext, PublishedBcmState, PublishedFsmEvent, PublishedFsmState,
-        PublishedHeadlampContext, PublishedHealthContext, PublishedPowertrainContext,
-        PublishedSccmContext, PublishedVehicleContext, PublishedVisibilityContext,
+        PublishedHeadlampContext, PublishedHeadlampState, PublishedHealthContext,
+        PublishedPowertrainContext, PublishedSccmContext, PublishedVehicleContext,
+        PublishedVisibilityContext,
         PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
         UnixTimestamp,
     };
@@ -381,12 +308,12 @@ mod tests {
     fn ctx(speed: u16, lux: u16, headlamp: PublishedHeadlampState) -> PublishedVehicleContext {
         PublishedVehicleContext {
             sccm: PublishedSccmContext {
-                hazard_button_on: false,
+                hazard_button_on: PublishedObservedBool::Unknown,
             },
             bcm: PublishedBcmContext {
                 state: PublishedBcmState::Off,
-                left_turn_request_on: false,
-                right_turn_request_on: false,
+                left_turn_request_on: PublishedObservedBool::Unknown,
+                right_turn_request_on: PublishedObservedBool::Unknown,
             },
             powertrain: PublishedPowertrainContext {
                 wheel_rpm: PublishedWheelRpm {
@@ -517,82 +444,54 @@ mod tests {
     }
 
     #[test]
-    fn driver_visibility_and_headlamps_share_a_line() {
-        let ledger = sample_ledger(10, 150, PublishedHeadlampState::On);
-        let pane = driver_pane(None, Some(&ledger), 64);
-        let line = pane
-            .lines
-            .iter()
-            .find(|l| l.role == LineRole::Visibility)
-            .expect("visibility line");
-        assert!(line.text().contains("Visibility:"));
-        assert!(line.text().contains("150 lux"));
-        assert!(line.text().contains("Headlamps: On"));
-        assert!(line.text().contains('◼')); // dark band
-    }
-
-    #[test]
-    fn driver_weather_line_uses_glyphs_from_ledger() {
-        let mut ledger = sample_ledger(10, 100, PublishedHeadlampState::Off);
-        ledger.current_ctx.weather.raining = true;
-        ledger.current_ctx.wiper.state = PublishedWiperState::Running;
-        let pane = driver_pane(None, Some(&ledger), 64);
-        let weather = pane
-            .lines
-            .iter()
-            .find(|l| l.role == LineRole::Weather)
-            .unwrap();
-        assert!(weather.text().contains('☁'));
-        assert!(weather.text().contains("Raining"));
-        assert!(weather.text().contains('≋'));
-        assert!(weather.text().contains("moving"));
-        assert!(!weather.text().contains('—'));
-    }
-
-    #[test]
-    fn driver_weather_line_dry_and_wipers_stopped() {
-        let ledger = sample_ledger(10, 100, PublishedHeadlampState::Off);
-        let pane = driver_pane(None, Some(&ledger), 64);
-        let weather = pane
-            .lines
-            .iter()
-            .find(|l| l.role == LineRole::Weather)
-            .unwrap();
-        assert!(weather.text().contains('☀'));
-        assert!(weather.text().contains("Sunny"));
-        assert!(weather.text().contains('x'));
-        assert!(weather.text().contains("stopped"));
-    }
-
-    #[test]
     fn driver_inserts_blank_spacers_between_segments() {
         let ledger = sample_ledger(10, 100, PublishedHeadlampState::Off);
         let pane = driver_pane(None, Some(&ledger), 64);
         let roles: Vec<_> = pane.lines.iter().map(|l| l.role).collect();
- // Two blank lines before Notice for top padding.
+        // Two blank lines before Notice for top padding.
         assert_eq!(roles[0], LineRole::Spacer);
         assert_eq!(roles[1], LineRole::Spacer);
         assert_eq!(roles[2], LineRole::Notice);
         assert!(roles.windows(2).any(|w| w[0] == LineRole::Notice && w[1] == LineRole::Spacer));
         assert!(roles.windows(2).any(|w| w[0] == LineRole::Speed && w[1] == LineRole::Spacer));
-        assert!(
-            roles
-                .windows(2)
-                .any(|w| w[0] == LineRole::Visibility && w[1] == LineRole::Spacer)
-        );
+        let labels: Vec<String> = pane
+            .lines
+            .iter()
+            .filter(|l| l.role == LineRole::Visibility)
+            .map(PaneLine::text)
+            .collect();
+        assert!(labels.iter().any(|t| t.contains("Hazard:")));
+        assert!(labels.iter().any(|t| t.contains("Left request:")));
+        assert!(labels.iter().any(|t| t.contains("Right request:")));
+        assert_eq!(labels.len(), 3);
     }
 
     #[test]
-    fn driver_visibility_lux_band_glyph() {
-        let ledger = sample_ledger(10, 100, PublishedHeadlampState::On);
-        let pane = driver_pane(None, Some(&ledger), 64);
-        let vis = pane
-            .lines
-            .iter()
-            .find(|l| l.role == LineRole::Visibility)
-            .unwrap();
-        assert!(vis.text().contains('◼'));
-        assert!(vis.text().contains("100 lux"));
+    fn format_observed_bool_uses_uppercase_labels() {
+        assert_eq!(
+            format_observed_bool(PublishedObservedBool::Unknown),
+            "UNKNOWN"
+        );
+        assert_eq!(format_observed_bool(PublishedObservedBool::Off), "OFF");
+        assert_eq!(format_observed_bool(PublishedObservedBool::On), "ON");
+    }
+
+    #[test]
+    fn driver_observed_lines_fit_narrow_and_normal_widths_without_lamp_confirmation() {
+        let mut ledger = sample_ledger(10, 150, PublishedHeadlampState::On);
+        ledger.current_ctx.sccm.hazard_button_on = PublishedObservedBool::On;
+        ledger.current_ctx.bcm.left_turn_request_on = PublishedObservedBool::On;
+        ledger.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::On;
+        for width in [24usize, 64] {
+            let pane = driver_pane(None, Some(&ledger), width);
+            for line in &pane.lines {
+                assert_eq!(line.display_width(), width, "{:?}", line.text());
+                let text = line.text();
+                assert!(!text.contains("Headlamp"), "{text}");
+                assert!(!text.contains("lamp"), "{text}");
+                assert!(!text.contains("confirmed"), "{text}");
+            }
+        }
     }
 
     #[test]
@@ -632,5 +531,58 @@ mod tests {
                 .count()
         };
         assert!(count(&high) > count(&low));
+    }
+
+    fn pane_text(pane: &DriverPane) -> String {
+        pane.lines
+            .iter()
+            .map(PaneLine::text)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn driver_shows_unknown_observed_signals_before_first_observation() {
+        let ledger = sample_ledger(10, 100, PublishedHeadlampState::Off);
+        let text = pane_text(&driver_pane(None, Some(&ledger), 64));
+        assert!(text.contains("Hazard: UNKNOWN"), "{text}");
+        assert!(text.contains("Left request: UNKNOWN"), "{text}");
+        assert!(text.contains("Right request: UNKNOWN"), "{text}");
+    }
+
+    #[test]
+    fn driver_shows_on_off_combinations_for_hazard_left_and_right() {
+        let mut hazard_on = sample_ledger(10, 100, PublishedHeadlampState::On);
+        hazard_on.current_ctx.sccm.hazard_button_on = PublishedObservedBool::On;
+        hazard_on.current_ctx.bcm.left_turn_request_on = PublishedObservedBool::Off;
+        hazard_on.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::On;
+        let on_off = pane_text(&driver_pane(None, Some(&hazard_on), 64));
+        assert!(on_off.contains("Hazard: ON"), "{on_off}");
+        assert!(on_off.contains("Left request: OFF"), "{on_off}");
+        assert!(on_off.contains("Right request: ON"), "{on_off}");
+
+        let mut all_off = sample_ledger(10, 100, PublishedHeadlampState::Off);
+        all_off.current_ctx.sccm.hazard_button_on = PublishedObservedBool::Off;
+        all_off.current_ctx.bcm.left_turn_request_on = PublishedObservedBool::On;
+        all_off.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::Off;
+        let off_on = pane_text(&driver_pane(None, Some(&all_off), 64));
+        assert!(off_on.contains("Hazard: OFF"), "{off_on}");
+        assert!(off_on.contains("Left request: ON"), "{off_on}");
+        assert!(off_on.contains("Right request: OFF"), "{off_on}");
+    }
+
+    #[test]
+    fn driver_active_view_omits_legacy_visibility_headlamp_weather_wiper() {
+        let mut ledger = sample_ledger(10, 150, PublishedHeadlampState::On);
+        ledger.current_ctx.weather.raining = true;
+        ledger.current_ctx.wiper.state = PublishedWiperState::Running;
+        let text = pane_text(&driver_pane(None, Some(&ledger), 64));
+        assert!(!text.contains("Visibility:"), "{text}");
+        assert!(!text.contains("Headlamps:"), "{text}");
+        assert!(!text.contains("Weather:"), "{text}");
+        assert!(!text.contains("Wipers:"), "{text}");
+        assert!(!text.contains("lux"), "{text}");
+        assert!(!text.contains("Raining"), "{text}");
+        assert!(!text.contains("moving"), "{text}");
     }
 }

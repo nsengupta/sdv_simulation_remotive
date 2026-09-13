@@ -311,7 +311,7 @@ async fn hazard_observation_does_not_compute_bcm_turn_lights() {
         .expect("hazard row timeout")
         .expect("transition channel closed");
 
-    assert_eq!(row.event, PublishedFsmEvent::HazardButtonChanged(true));
+    assert_eq!(row.event, PublishedFsmEvent::HazardButtonObserved(true));
     assert!(
         !row.actions
             .iter()
@@ -430,7 +430,7 @@ async fn stale_or_wrong_bcm_tell_back_cannot_commit_observed_turn() {
         .await
         .expect("correlated row timeout")
         .expect("transition channel closed");
-    assert_eq!(row.event, PublishedFsmEvent::TimerTick);
+    assert_eq!(row.event, PublishedFsmEvent::LeftTurnRequestObserved(true));
 }
 
 #[tokio::test]

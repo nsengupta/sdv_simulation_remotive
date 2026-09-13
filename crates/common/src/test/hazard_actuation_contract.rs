@@ -11,8 +11,8 @@ use crate::twin_runtime::controller::actuation_manager::{
 use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
 use crate::vehicle_state::VehicleContext;
 use crate::{
-    ActuationCommand, CorrelationId, DiagnosticKind, PublishedFsmEvent, VehicleController,
-    VehicleControllerError,
+    ActuationCommand, CorrelationId, DiagnosticKind, PublishedFsmEvent, PublishedObservedBool,
+    VehicleController, VehicleControllerError,
 };
 
 fn blank_twin() -> DigitalTwinCar {
@@ -106,10 +106,11 @@ async fn changed_hazard_commands_are_deduplicated_without_consuming_correlation_
         .expect("transition channel closed");
     assert_eq!(
         on_record.event,
-        PublishedFsmEvent::HazardButtonChanged(true)
+        PublishedFsmEvent::HazardButtonObserved(true)
     );
-    assert!(
+    assert_eq!(
         on_record.current_ctx.sccm.hazard_button_on,
+        PublishedObservedBool::On,
         "published ledger must mirror the observed SCCM value"
     );
     assert!(
@@ -146,7 +147,7 @@ async fn changed_hazard_commands_are_deduplicated_without_consuming_correlation_
         .expect("transition channel closed");
     assert_eq!(
         off_record.event,
-        PublishedFsmEvent::HazardButtonChanged(false)
+        PublishedFsmEvent::HazardButtonObserved(false)
     );
     assert!(
         tokio::time::timeout(Duration::from_millis(50), actuation_rx.recv())
@@ -189,7 +190,7 @@ async fn saturated_transition_channel_does_not_retain_duplicate_observed_hazard_
         .await
         .expect("initial observed record timeout")
         .expect("transition channel closed");
-    assert_eq!(initial.event, PublishedFsmEvent::HazardButtonChanged(true));
+    assert_eq!(initial.event, PublishedFsmEvent::HazardButtonObserved(true));
     assert!(
         tokio::time::timeout(Duration::from_millis(50), transition_rx.recv())
             .await

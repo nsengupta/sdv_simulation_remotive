@@ -1,10 +1,11 @@
 //! Schema dispatch and version constant.
 //!
-//! Archival DTOs live in [`v1`] (module name retained). Version 3 is retained as a read-only
-//! compatibility shape via serde defaults; version 4 is emitted for Phase I hazard vocabulary.
+//! Archival DTOs live in [`v1`] (module name retained). Versions 1–4 remain readable:
+//! missing SCCM/BCM objects default, and historical boolean fields deserialize as Off/On.
+//! Version 5 emits tri-state observed values.
 
-pub const MIN_SUPPORTED_SCHEMA_VERSION: u32 = 3;
-pub const CURRENT_SCHEMA_VERSION: u32 = 4;
+pub const MIN_SUPPORTED_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 5;
 
 pub fn is_supported_schema_version(version: u32) -> bool {
     (MIN_SUPPORTED_SCHEMA_VERSION..=CURRENT_SCHEMA_VERSION).contains(&version)

@@ -1,5 +1,8 @@
 use super::{LineRole, PaneLine, fit_line};
-use common::facade::{PublishedFsmEvent, PublishedFsmState, PublishedTransitionRecord};
+use common::facade::{
+    PublishedBcmState, PublishedFsmEvent, PublishedFsmState, PublishedObservedBool,
+    PublishedTransitionRecord,
+};
 use std::collections::VecDeque;
 
 pub const LEDGER_TAIL_N: usize = 20;
@@ -73,11 +76,15 @@ fn oldest_droppable_index(rows: &VecDeque<PublishedTransitionRecord>) -> Option<
 
 pub fn format_ledger_line(row: &PublishedTransitionRecord, width: usize, newest: bool) -> PaneLine {
     let body = format!(
-        "[{}] | {} | {} -> {}",
+        "[{}] | {} | {} -> {} | SCCM Hazard={} | BCM {} L={} R={}",
         row.record_seq,
         format_event(&row.event),
         format_state(&row.old_state),
-        format_state(&row.next_state)
+        format_state(&row.next_state),
+        format_observed_bool(row.current_ctx.sccm.hazard_button_on),
+        format_bcm_state(row.current_ctx.bcm.state),
+        format_observed_bool(row.current_ctx.bcm.left_turn_request_on),
+        format_observed_bool(row.current_ctx.bcm.right_turn_request_on),
     );
     let line = if newest {
         format!("> {body}")
@@ -101,6 +108,15 @@ fn format_event(event: &PublishedFsmEvent) -> String {
     match event {
         PublishedFsmEvent::UpdateRpm(rpm) => format!("UpdateRpm({rpm})"),
         PublishedFsmEvent::UpdateAmbientLux(lux) => format!("UpdateAmbientLux({lux})"),
+        PublishedFsmEvent::HazardButtonObserved(pressed) => {
+            format!("HazardButtonObserved({pressed})")
+        }
+        PublishedFsmEvent::LeftTurnRequestObserved(pressed) => {
+            format!("LeftTurnRequestObserved({pressed})")
+        }
+        PublishedFsmEvent::RightTurnRequestObserved(pressed) => {
+            format!("RightTurnRequestObserved({pressed})")
+        }
         PublishedFsmEvent::FrontHeadlampActuationIncomplete { direction, cause } => {
             format!("HeadlampIncomplete({direction:?},{cause:?})")
         }
@@ -109,12 +125,28 @@ fn format_event(event: &PublishedFsmEvent) -> String {
     }
 }
 
+fn format_observed_bool(value: PublishedObservedBool) -> &'static str {
+    match value {
+        PublishedObservedBool::Unknown => "UNKNOWN",
+        PublishedObservedBool::Off => "OFF",
+        PublishedObservedBool::On => "ON",
+    }
+}
+
+fn format_bcm_state(state: PublishedBcmState) -> &'static str {
+    match state {
+        PublishedBcmState::Off => "Off",
+        PublishedBcmState::Ready => "Ready",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use common::facade::{
-        PublishedBcmContext, PublishedBcmState, PublishedHeadlampContext, PublishedHeadlampState,
-        PublishedHealthContext, PublishedPowertrainContext, PublishedSccmContext,
+        PublishedBcmContext, PublishedHeadlampContext, PublishedHeadlampState,
+        PublishedHealthContext, PublishedPowertrainContext,
+        PublishedSccmContext,
         PublishedVehicleContext, PublishedVisibilityContext, PublishedWeatherContext,
         PublishedWheelRpm, PublishedWiperContext, PublishedWiperState, UnixTimestamp,
     };
@@ -139,12 +171,12 @@ mod tests {
     fn empty_ctx() -> PublishedVehicleContext {
         PublishedVehicleContext {
             sccm: PublishedSccmContext {
-                hazard_button_on: false,
+                hazard_button_on: PublishedObservedBool::Unknown,
             },
             bcm: PublishedBcmContext {
                 state: PublishedBcmState::Off,
-                left_turn_request_on: false,
-                right_turn_request_on: false,
+                left_turn_request_on: PublishedObservedBool::Unknown,
+                right_turn_request_on: PublishedObservedBool::Unknown,
             },
             powertrain: PublishedPowertrainContext {
                 wheel_rpm: PublishedWheelRpm {
@@ -234,5 +266,60 @@ mod tests {
         let line = format_ledger_line(&row, 80, true).text();
         assert!(line.contains("PreparingToStop -> SwitchedOff"), "{line}");
         assert!(!line.contains("-> Off"));
+    }
+
+    #[test]
+    fn ledger_formats_observed_events_explicitly() {
+        let hazard = format_ledger_line(
+            &sample_with_seq(3, PublishedFsmEvent::HazardButtonObserved(true)),
+            100,
+            true,
+        )
+        .text();
+        assert!(hazard.contains("HazardButtonObserved(true)"), "{hazard}");
+
+        let left = format_ledger_line(
+            &sample_with_seq(4, PublishedFsmEvent::LeftTurnRequestObserved(true)),
+            100,
+            false,
+        )
+        .text();
+        assert!(left.contains("LeftTurnRequestObserved(true)"), "{left}");
+
+        let right = format_ledger_line(
+            &sample_with_seq(5, PublishedFsmEvent::RightTurnRequestObserved(false)),
+            100,
+            false,
+        )
+        .text();
+        assert!(
+            right.contains("RightTurnRequestObserved(false)"),
+            "{right}"
+        );
+    }
+
+    #[test]
+    fn ledger_shows_sccm_bcm_readiness_and_latest_values() {
+        let mut unknown = sample_with_seq(1, PublishedFsmEvent::TimerTick);
+        let unknown_line = format_ledger_line(&unknown, 120, true).text();
+        assert!(
+            unknown_line.contains("SCCM Hazard=UNKNOWN"),
+            "{unknown_line}"
+        );
+        assert!(unknown_line.contains("BCM Off"), "{unknown_line}");
+        assert!(unknown_line.contains("L=UNKNOWN"), "{unknown_line}");
+        assert!(unknown_line.contains("R=UNKNOWN"), "{unknown_line}");
+
+        unknown.current_ctx.sccm.hazard_button_on = PublishedObservedBool::On;
+        unknown.current_ctx.bcm.state = PublishedBcmState::Ready;
+        unknown.current_ctx.bcm.left_turn_request_on = PublishedObservedBool::On;
+        unknown.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::Off;
+        unknown.event = PublishedFsmEvent::HazardButtonObserved(true);
+        let known = format_ledger_line(&unknown, 120, true).text();
+        assert!(known.contains("HazardButtonObserved(true)"), "{known}");
+        assert!(known.contains("SCCM Hazard=ON"), "{known}");
+        assert!(known.contains("BCM Ready"), "{known}");
+        assert!(known.contains("L=ON"), "{known}");
+        assert!(known.contains("R=OFF"), "{known}");
     }
 }

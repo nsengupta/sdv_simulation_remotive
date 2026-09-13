@@ -1,6 +1,8 @@
 //! Ledger-shaped stdout for `--print-transitions-only` (ANSI when stdout is a TTY).
 
-use common::facade::{PublishedFsmEvent, PublishedFsmState, PublishedTransitionRecord};
+use common::facade::{
+    PublishedFsmEvent, PublishedFsmState, PublishedObservedBool, PublishedTransitionRecord,
+};
 
 pub fn spawn_transition_log_task(
     rx: tokio::sync::mpsc::Receiver<PublishedTransitionRecord>,
@@ -25,10 +27,10 @@ fn format_transition_record(record: &PublishedTransitionRecord, color: bool) -> 
     };
     let headlamp = format!("headlamp={:?}", record.current_ctx.headlamp.state);
     let hazard = format!(
-        "sccm.hazard_button_on={}  bcm.left_turn_request_on={}  bcm.right_turn_request_on={}",
-        record.current_ctx.sccm.hazard_button_on,
-        record.current_ctx.bcm.left_turn_request_on,
-        record.current_ctx.bcm.right_turn_request_on,
+        "sccm.hazard_button={}  bcm.left_turn_request={}  bcm.right_turn_request={}",
+        format_observed_bool(record.current_ctx.sccm.hazard_button_on),
+        format_observed_bool(record.current_ctx.bcm.left_turn_request_on),
+        format_observed_bool(record.current_ctx.bcm.right_turn_request_on),
     );
 
     if !color {
@@ -46,6 +48,14 @@ fn format_transition_record(record: &PublishedTransitionRecord, color: bool) -> 
             ansi::MAGENTA
         },
     )
+}
+
+fn format_observed_bool(value: PublishedObservedBool) -> &'static str {
+    match value {
+        PublishedObservedBool::Unknown => "unknown",
+        PublishedObservedBool::Off => "off",
+        PublishedObservedBool::On => "on",
+    }
 }
 
 fn format_state_transition(
@@ -114,10 +124,10 @@ mod tests {
     use common::facade::{
         PublishedBcmContext, PublishedBcmState, PublishedDomainAction, PublishedFsmEvent,
         PublishedFsmState, PublishedHeadlampContext, PublishedHeadlampState,
-        PublishedHealthContext, PublishedPowertrainContext, PublishedSccmContext,
-        PublishedTransitionRecord, PublishedVehicleContext, PublishedVisibilityContext,
-        PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
-        UnixTimestamp,
+        PublishedHealthContext, PublishedObservedBool, PublishedPowertrainContext,
+        PublishedSccmContext, PublishedTransitionRecord, PublishedVehicleContext,
+        PublishedVisibilityContext, PublishedWeatherContext, PublishedWheelRpm,
+        PublishedWiperContext, PublishedWiperState, UnixTimestamp,
     };
     use std::time::Duration;
 
@@ -139,12 +149,12 @@ mod tests {
     fn empty_ctx() -> PublishedVehicleContext {
         PublishedVehicleContext {
             sccm: PublishedSccmContext {
-                hazard_button_on: false,
+                hazard_button_on: PublishedObservedBool::Unknown,
             },
             bcm: PublishedBcmContext {
                 state: PublishedBcmState::Off,
-                left_turn_request_on: false,
-                right_turn_request_on: false,
+                left_turn_request_on: PublishedObservedBool::Unknown,
+                right_turn_request_on: PublishedObservedBool::Unknown,
             },
             powertrain: PublishedPowertrainContext {
                 wheel_rpm: PublishedWheelRpm {
@@ -185,16 +195,58 @@ mod tests {
     fn plain_format_includes_hazard_sccm_and_bcm_projection() {
         let mut record = sample_record();
         record.event = PublishedFsmEvent::HazardButtonChanged(true);
-        record.current_ctx.sccm.hazard_button_on = true;
+        record.current_ctx.sccm.hazard_button_on = PublishedObservedBool::On;
         record.current_ctx.bcm.state = PublishedBcmState::Ready;
-        record.current_ctx.bcm.left_turn_request_on = true;
-        record.current_ctx.bcm.right_turn_request_on = true;
+        record.current_ctx.bcm.left_turn_request_on = PublishedObservedBool::On;
+        record.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::On;
 
         let line = format_transition_record(&record, false);
 
-        assert!(line.contains("sccm.hazard_button_on=true"));
-        assert!(line.contains("bcm.left_turn_request_on=true"));
-        assert!(line.contains("bcm.right_turn_request_on=true"));
+        assert!(line.contains("sccm.hazard_button=on"));
+        assert!(line.contains("bcm.left_turn_request=on"));
+        assert!(line.contains("bcm.right_turn_request=on"));
+    }
+
+    #[test]
+    fn plain_format_uses_observed_event_names_and_tri_state_labels() {
+        let mut hazard = sample_record();
+        hazard.event = PublishedFsmEvent::HazardButtonObserved(true);
+        hazard.current_ctx.sccm.hazard_button_on = PublishedObservedBool::On;
+        let hazard_line = format_transition_record(&hazard, false);
+        assert!(
+            hazard_line.contains("HazardButtonObserved(true)"),
+            "{hazard_line}"
+        );
+        assert!(
+            hazard_line.contains("sccm.hazard_button=on"),
+            "{hazard_line}"
+        );
+
+        let mut left = sample_record();
+        left.event = PublishedFsmEvent::LeftTurnRequestObserved(true);
+        left.current_ctx.bcm.left_turn_request_on = PublishedObservedBool::On;
+        let left_line = format_transition_record(&left, false);
+        assert!(
+            left_line.contains("LeftTurnRequestObserved(true)"),
+            "{left_line}"
+        );
+        assert!(
+            left_line.contains("bcm.left_turn_request=on"),
+            "{left_line}"
+        );
+
+        let mut right = sample_record();
+        right.event = PublishedFsmEvent::RightTurnRequestObserved(true);
+        right.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::On;
+        let right_line = format_transition_record(&right, false);
+        assert!(
+            right_line.contains("RightTurnRequestObserved(true)"),
+            "{right_line}"
+        );
+        assert!(
+            right_line.contains("bcm.right_turn_request=on"),
+            "{right_line}"
+        );
     }
 
     #[test]

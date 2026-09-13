@@ -49,10 +49,10 @@ pub use observation_records::{
     PublishedDomainAction, PublishedFrontHeadlampIncompleteCause,
     PublishedFrontHeadlampSwitchDirection, PublishedFsmEvent, PublishedFsmState,
     PublishedHeadlampContext, PublishedHeadlampState, PublishedHealthContext,
-    PublishedPowertrainContext, PublishedSccmContext, PublishedTransitionRecord,
-    PublishedVehicleContext, PublishedVisibilityContext, PublishedWeatherContext,
-    PublishedWheelRpm, PublishedWiperContext, PublishedWiperState, SessionClock,
-    elapsed_since_session,
+    PublishedObservedBool, PublishedPowertrainContext, PublishedSccmContext,
+    PublishedTransitionRecord, PublishedVehicleContext, PublishedVisibilityContext,
+    PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
+    SessionClock, elapsed_since_session,
 };
 pub use signals::{ControlSignal, LifecycleCommand, ObservedEcuSignal, VssSignal};
 pub use twin_runtime::connectors::{IngressToFsmProjector, ProjectionError, Projector};

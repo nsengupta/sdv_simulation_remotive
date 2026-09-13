@@ -35,10 +35,10 @@ pub use crate::observation_records::transition::{
     PublishedBcmContext, PublishedBcmState, PublishedDomainAction,
     PublishedFrontHeadlampIncompleteCause, PublishedFrontHeadlampSwitchDirection,
     PublishedFsmEvent, PublishedFsmState, PublishedHeadlampContext, PublishedHeadlampState,
-    PublishedHealthContext, PublishedOperational, PublishedPowertrainContext, PublishedSccmContext,
-    PublishedTransitionRecord, PublishedVehicleContext, PublishedVisibilityContext,
-    PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
-    UnixTimestamp,
+    PublishedHealthContext, PublishedObservedBool, PublishedOperational,
+    PublishedPowertrainContext, PublishedSccmContext, PublishedTransitionRecord,
+    PublishedVehicleContext, PublishedVisibilityContext, PublishedWeatherContext,
+    PublishedWheelRpm, PublishedWiperContext, PublishedWiperState, UnixTimestamp,
 };
 
 // --- Headlamp ingress/egress log tokens (gateway CAN loop display) ---

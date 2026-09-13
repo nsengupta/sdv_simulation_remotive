@@ -277,6 +277,6 @@ async fn duplicate_tell_back_unblocks_the_barrier_without_a_record() {
     );
     assert_eq!(
         changed.event,
-        crate::PublishedFsmEvent::HazardButtonChanged(true)
+        crate::PublishedFsmEvent::HazardButtonObserved(true)
     );
 }

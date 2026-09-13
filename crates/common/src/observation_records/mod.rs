@@ -22,8 +22,8 @@ pub use transition::{
     PublishedBcmContext, PublishedBcmState, PublishedDomainAction,
     PublishedFrontHeadlampIncompleteCause, PublishedFrontHeadlampSwitchDirection,
     PublishedFsmEvent, PublishedFsmState, PublishedHeadlampContext, PublishedHeadlampState,
-    PublishedHealthContext, PublishedPowertrainContext, PublishedSccmContext,
-    PublishedTransitionRecord, PublishedVehicleContext, PublishedVisibilityContext,
-    PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
-    SessionClock,
+    PublishedHealthContext, PublishedObservedBool, PublishedPowertrainContext,
+    PublishedSccmContext, PublishedTransitionRecord, PublishedVehicleContext,
+    PublishedVisibilityContext, PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext,
+    PublishedWiperState, SessionClock,
 };

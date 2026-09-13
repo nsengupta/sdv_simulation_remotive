@@ -19,10 +19,11 @@ use common::facade::{
     DiagnosticKind, DiagnosticLevel, DiagnosticRecord, PublishedBcmContext, PublishedBcmState,
     PublishedDomainAction, PublishedFrontHeadlampIncompleteCause,
     PublishedFrontHeadlampSwitchDirection, PublishedFsmEvent, PublishedFsmState,
-    PublishedHeadlampContext, PublishedHeadlampState, PublishedHealthContext, PublishedOperational,
-    PublishedPowertrainContext, PublishedSccmContext, PublishedTransitionRecord,
-    PublishedVehicleContext, PublishedVisibilityContext, PublishedWeatherContext,
-    PublishedWheelRpm, PublishedWiperContext, PublishedWiperState, UnixTimestamp,
+    PublishedHeadlampContext, PublishedHeadlampState, PublishedHealthContext,
+    PublishedObservedBool, PublishedOperational, PublishedPowertrainContext, PublishedSccmContext,
+    PublishedTransitionRecord, PublishedVehicleContext, PublishedVisibilityContext,
+    PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
+    UnixTimestamp,
 };
 use common::fsm::FrontHeadlampIncompleteCause;
 
@@ -252,6 +253,15 @@ pub enum FsmEventV1 {
     HazardButtonChanged {
         pressed: bool,
     },
+    HazardButtonObserved {
+        pressed: bool,
+    },
+    LeftTurnRequestObserved {
+        pressed: bool,
+    },
+    RightTurnRequestObserved {
+        pressed: bool,
+    },
     UpdateAmbientLux {
         lux: u16,
     },
@@ -409,9 +419,89 @@ pub struct WiperContextV1 {
     pub state: WiperStateV1,
 }
 
+/// Tri-state observed boolean written by schema v5.
+///
+/// Historical v1–v4 JSON booleans deserialize as [`Off`](Self::Off) / [`On`](Self::On).
+/// Missing fields default to [`Off`](Self::Off) to preserve the previous `false` default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservedBoolV1 {
+    Unknown,
+    Off,
+    On,
+}
+
+impl Default for ObservedBoolV1 {
+    fn default() -> Self {
+        Self::Off
+    }
+}
+
+impl From<PublishedObservedBool> for ObservedBoolV1 {
+    fn from(value: PublishedObservedBool) -> Self {
+        match value {
+            PublishedObservedBool::Unknown => Self::Unknown,
+            PublishedObservedBool::Off => Self::Off,
+            PublishedObservedBool::On => Self::On,
+        }
+    }
+}
+
+impl From<ObservedBoolV1> for PublishedObservedBool {
+    fn from(value: ObservedBoolV1) -> Self {
+        match value {
+            ObservedBoolV1::Unknown => Self::Unknown,
+            ObservedBoolV1::Off => Self::Off,
+            ObservedBoolV1::On => Self::On,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ObservedBoolV1 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ObservedBoolVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ObservedBoolVisitor {
+            type Value = ObservedBoolV1;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an observed bool (unknown/off/on) or a historical boolean")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(if value {
+                    ObservedBoolV1::On
+                } else {
+                    ObservedBoolV1::Off
+                })
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                match value {
+                    "unknown" => Ok(ObservedBoolV1::Unknown),
+                    "off" => Ok(ObservedBoolV1::Off),
+                    "on" => Ok(ObservedBoolV1::On),
+                    other => Err(E::unknown_variant(other, &["unknown", "off", "on"])),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(ObservedBoolVisitor)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SccmContextV1 {
-    pub hazard_button_on: bool,
+    pub hazard_button_on: ObservedBoolV1,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -430,8 +520,8 @@ impl Default for BcmStateV1 {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BcmContextV1 {
     pub state: BcmStateV1,
-    pub left_turn_request_on: bool,
-    pub right_turn_request_on: bool,
+    pub left_turn_request_on: ObservedBoolV1,
+    pub right_turn_request_on: ObservedBoolV1,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -607,6 +697,15 @@ fn project_fsm_event(event: &PublishedFsmEvent) -> FsmEventV1 {
         PublishedFsmEvent::HazardButtonChanged(pressed) => {
             FsmEventV1::HazardButtonChanged { pressed: *pressed }
         }
+        PublishedFsmEvent::HazardButtonObserved(pressed) => {
+            FsmEventV1::HazardButtonObserved { pressed: *pressed }
+        }
+        PublishedFsmEvent::LeftTurnRequestObserved(pressed) => {
+            FsmEventV1::LeftTurnRequestObserved { pressed: *pressed }
+        }
+        PublishedFsmEvent::RightTurnRequestObserved(pressed) => {
+            FsmEventV1::RightTurnRequestObserved { pressed: *pressed }
+        }
         PublishedFsmEvent::UpdateAmbientLux(lux) => FsmEventV1::UpdateAmbientLux { lux: *lux },
         PublishedFsmEvent::FrontHeadlampOnAck => FsmEventV1::FrontHeadlampOnAck,
         PublishedFsmEvent::FrontHeadlampOffAck => FsmEventV1::FrontHeadlampOffAck,
@@ -665,12 +764,12 @@ fn project_domain_action(action: &PublishedDomainAction) -> DomainActionV1 {
 fn project_vehicle_context(ctx: &PublishedVehicleContext) -> VehicleContextV1 {
     VehicleContextV1 {
         sccm: SccmContextV1 {
-            hazard_button_on: ctx.sccm.hazard_button_on,
+            hazard_button_on: ctx.sccm.hazard_button_on.into(),
         },
         bcm: BcmContextV1 {
             state: project_bcm_state(ctx.bcm.state),
-            left_turn_request_on: ctx.bcm.left_turn_request_on,
-            right_turn_request_on: ctx.bcm.right_turn_request_on,
+            left_turn_request_on: ctx.bcm.left_turn_request_on.into(),
+            right_turn_request_on: ctx.bcm.right_turn_request_on.into(),
         },
         powertrain: project_powertrain_context(&ctx.powertrain),
         health: project_health_context(&ctx.health),
@@ -867,6 +966,15 @@ fn live_fsm_event(event: &FsmEventV1) -> PublishedFsmEvent {
         FsmEventV1::HazardButtonChanged { pressed } => {
             PublishedFsmEvent::HazardButtonChanged(*pressed)
         }
+        FsmEventV1::HazardButtonObserved { pressed } => {
+            PublishedFsmEvent::HazardButtonObserved(*pressed)
+        }
+        FsmEventV1::LeftTurnRequestObserved { pressed } => {
+            PublishedFsmEvent::LeftTurnRequestObserved(*pressed)
+        }
+        FsmEventV1::RightTurnRequestObserved { pressed } => {
+            PublishedFsmEvent::RightTurnRequestObserved(*pressed)
+        }
         FsmEventV1::UpdateAmbientLux { lux } => PublishedFsmEvent::UpdateAmbientLux(*lux),
         FsmEventV1::FrontHeadlampOnAck => PublishedFsmEvent::FrontHeadlampOnAck,
         FsmEventV1::FrontHeadlampOffAck => PublishedFsmEvent::FrontHeadlampOffAck,
@@ -925,12 +1033,12 @@ fn live_domain_action(action: &DomainActionV1) -> PublishedDomainAction {
 fn live_vehicle_context(ctx: &VehicleContextV1) -> PublishedVehicleContext {
     PublishedVehicleContext {
         sccm: PublishedSccmContext {
-            hazard_button_on: ctx.sccm.hazard_button_on,
+            hazard_button_on: ctx.sccm.hazard_button_on.into(),
         },
         bcm: PublishedBcmContext {
             state: live_bcm_state(ctx.bcm.state),
-            left_turn_request_on: ctx.bcm.left_turn_request_on,
-            right_turn_request_on: ctx.bcm.right_turn_request_on,
+            left_turn_request_on: ctx.bcm.left_turn_request_on.into(),
+            right_turn_request_on: ctx.bcm.right_turn_request_on.into(),
         },
         powertrain: PublishedPowertrainContext {
             wheel_rpm: PublishedWheelRpm {

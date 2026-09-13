@@ -776,21 +776,74 @@ mod tests {
         }
     }
 
+    #[test]
+    fn dashboard_live_state_renders_sccm_bcm_focused_panes() {
+        let mut state = DashboardState::default();
+        let mut row = sample_ledger_row();
+        row.event = PublishedFsmEvent::HazardButtonObserved(true);
+        row.current_ctx.sccm.hazard_button_on = common::facade::PublishedObservedBool::On;
+        row.current_ctx.bcm.state = common::facade::PublishedBcmState::Ready;
+        row.current_ctx.bcm.left_turn_request_on = common::facade::PublishedObservedBool::On;
+        row.current_ctx.bcm.right_turn_request_on = common::facade::PublishedObservedBool::Off;
+        apply_ledger(row, &mut state);
+
+        let driver = view::driver_pane(None, state.latest_transition.as_ref(), 72);
+        let engineer = view::engineer_pane(state.latest_transition.as_ref(), 72);
+        let driver_text = driver
+            .lines
+            .iter()
+            .map(view::PaneLine::text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let engineer_text = engineer
+            .lines
+            .iter()
+            .map(view::PaneLine::text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let ledger_text = state
+            .ledger_tail
+            .lines(120)
+            .iter()
+            .map(view::PaneLine::text)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(driver_text.contains("Hazard: ON"), "{driver_text}");
+        assert!(driver_text.contains("Left request: ON"), "{driver_text}");
+        assert!(driver_text.contains("Right request: OFF"), "{driver_text}");
+        assert!(!driver_text.contains("Visibility:"), "{driver_text}");
+        assert!(!driver_text.contains("Wipers:"), "{driver_text}");
+        assert!(
+            engineer_text.contains("Last event: HazardButtonObserved(true)"),
+            "{engineer_text}"
+        );
+        assert!(engineer_text.contains("SCCM: Hazard ON"), "{engineer_text}");
+        assert!(
+            engineer_text.contains("BCM: Ready  Left ON  Right OFF"),
+            "{engineer_text}"
+        );
+        assert!(ledger_text.contains("HazardButtonObserved(true)"), "{ledger_text}");
+        assert!(ledger_text.contains("SCCM Hazard=ON"), "{ledger_text}");
+        assert!(ledger_text.contains("BCM Ready"), "{ledger_text}");
+    }
+
     fn empty_published_ctx() -> common::facade::PublishedVehicleContext {
         use common::facade::{
             PublishedBcmContext, PublishedBcmState, PublishedHeadlampContext,
-            PublishedHeadlampState, PublishedHealthContext, PublishedPowertrainContext,
-            PublishedSccmContext, PublishedVehicleContext, PublishedVisibilityContext,
+            PublishedHeadlampState, PublishedHealthContext, PublishedObservedBool,
+            PublishedPowertrainContext, PublishedSccmContext, PublishedVehicleContext,
+            PublishedVisibilityContext,
             PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
         };
         PublishedVehicleContext {
             sccm: PublishedSccmContext {
-                hazard_button_on: false,
+                hazard_button_on: PublishedObservedBool::Unknown,
             },
             bcm: PublishedBcmContext {
                 state: PublishedBcmState::Off,
-                left_turn_request_on: false,
-                right_turn_request_on: false,
+                left_turn_request_on: PublishedObservedBool::Unknown,
+                right_turn_request_on: PublishedObservedBool::Unknown,
             },
             powertrain: PublishedPowertrainContext {
                 wheel_rpm: PublishedWheelRpm {

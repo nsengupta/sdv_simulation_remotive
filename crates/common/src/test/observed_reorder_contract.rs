@@ -123,8 +123,11 @@ async fn delayed_sccm_reply_keeps_ingress_commit_order() {
 
     let first = recv_row(&mut rx).await;
     let second = recv_row(&mut rx).await;
-    assert_eq!(first.event, PublishedFsmEvent::HazardButtonChanged(false));
-    assert_eq!(second.event, PublishedFsmEvent::TimerTick);
+    assert_eq!(first.event, PublishedFsmEvent::HazardButtonObserved(false));
+    assert_eq!(
+        second.event,
+        PublishedFsmEvent::LeftTurnRequestObserved(true)
+    );
     assert_eq!(second.record_seq, first.record_seq + 1);
 
     let snapshot = controller

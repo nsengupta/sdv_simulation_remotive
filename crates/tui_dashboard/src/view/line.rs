@@ -13,6 +13,8 @@ pub enum LineRole {
     Notice,
     Speed,
     Visibility,
+    /// Retained for Phase I weather/wiper rows; unused in the Phase II active driver view.
+    #[allow(dead_code)]
     Weather,
     EngineerState,
     EngineerEvent,
@@ -46,6 +48,8 @@ impl SegmentStyle {
 }
 
 /// Driver glyph vocabulary (not on the wire — presentation only).
+/// Kept for compatibility; the Phase II active driver view does not emit icons.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DriverIcon {
     LuxDark,
@@ -70,6 +74,7 @@ impl DriverIcon {
         }
     }
 
+    #[allow(dead_code)]
     pub fn for_ambient_lux(lux: u16) -> Self {
         if lux <= LUX_ON_THRESHOLD {
             Self::LuxDark
@@ -89,6 +94,7 @@ pub enum SegmentContent {
  /// Reserved: coloured visibility boxes (not emitted yet).
     #[allow(dead_code)]
     Swatch,
+    #[allow(dead_code)]
     Icon(DriverIcon),
 }
 

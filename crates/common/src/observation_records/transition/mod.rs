@@ -28,8 +28,8 @@ use serde::{Deserialize, Serialize};
 use crate::fsm::{DomainAction, FsmEvent, FsmState, RawTransitionRecord};
 use crate::vehicle_state::{
     BcmState, FrontHeadlampIncompleteCause, FrontHeadlampSwitchDirection, HeadlampContext,
-    HeadlampState, PowertrainContext, VehicleContext, VehicleHealthContext, VisibilityContext,
-    WheelRpm, WiperState,
+    HeadlampState, ObservedBool, PowertrainContext, VehicleContext, VehicleHealthContext,
+    VisibilityContext, WheelRpm, WiperState,
 };
 
 /// Wall-clock instant since the Unix Epoch, for Twin-authored observation records.
@@ -173,12 +173,34 @@ impl From<&crate::fsm::Operational> for PublishedOperational {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublishedObservedBool {
+    #[default]
+    Unknown,
+    Off,
+    On,
+}
+
+impl From<ObservedBool> for PublishedObservedBool {
+    fn from(value: ObservedBool) -> Self {
+        match value {
+            ObservedBool::Unknown => Self::Unknown,
+            ObservedBool::Off => Self::Off,
+            ObservedBool::On => Self::On,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PublishedFsmEvent {
     PowerOn,
     PowerOff,
     UpdateRpm(u16),
     HazardButtonChanged(bool),
+    HazardButtonObserved(bool),
+    LeftTurnRequestObserved(bool),
+    RightTurnRequestObserved(bool),
     UpdateAmbientLux(u16),
     FrontHeadlampOnAck,
     FrontHeadlampOffAck,
@@ -199,11 +221,9 @@ impl From<&FsmEvent> for PublishedFsmEvent {
             FsmEvent::PowerOff => Self::PowerOff,
             FsmEvent::UpdateRpm(rpm) => Self::UpdateRpm(*rpm),
             FsmEvent::HazardButtonChanged(pressed) => Self::HazardButtonChanged(*pressed),
-            // Phase II published observed variants arrive in Task 4.
-            FsmEvent::HazardButtonObserved(pressed) => Self::HazardButtonChanged(*pressed),
-            FsmEvent::LeftTurnRequestObserved(_) | FsmEvent::RightTurnRequestObserved(_) => {
-                Self::TimerTick
-            }
+            FsmEvent::HazardButtonObserved(pressed) => Self::HazardButtonObserved(*pressed),
+            FsmEvent::LeftTurnRequestObserved(pressed) => Self::LeftTurnRequestObserved(*pressed),
+            FsmEvent::RightTurnRequestObserved(pressed) => Self::RightTurnRequestObserved(*pressed),
             FsmEvent::UpdateAmbientLux(lux) => Self::UpdateAmbientLux(*lux),
             FsmEvent::FrontHeadlampOnAck => Self::FrontHeadlampOnAck,
             FsmEvent::FrontHeadlampOffAck => Self::FrontHeadlampOffAck,
@@ -399,13 +419,13 @@ impl From<&crate::vehicle_state::WiperContext> for PublishedWiperContext {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublishedSccmContext {
-    pub hazard_button_on: bool,
+    pub hazard_button_on: PublishedObservedBool,
 }
 
 impl From<&crate::vehicle_state::SccmContext> for PublishedSccmContext {
     fn from(s: &crate::vehicle_state::SccmContext) -> Self {
         Self {
-            hazard_button_on: s.hazard_button_on,
+            hazard_button_on: s.hazard_button.into(),
         }
     }
 }
@@ -429,16 +449,16 @@ impl From<&BcmState> for PublishedBcmState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublishedBcmContext {
     pub state: PublishedBcmState,
-    pub left_turn_request_on: bool,
-    pub right_turn_request_on: bool,
+    pub left_turn_request_on: PublishedObservedBool,
+    pub right_turn_request_on: PublishedObservedBool,
 }
 
 impl From<&crate::vehicle_state::BcmContext> for PublishedBcmContext {
     fn from(b: &crate::vehicle_state::BcmContext) -> Self {
         Self {
             state: (&b.state).into(),
-            left_turn_request_on: b.left_turn_request_on,
-            right_turn_request_on: b.right_turn_request_on,
+            left_turn_request_on: b.left_turn_request.into(),
+            right_turn_request_on: b.right_turn_request.into(),
         }
     }
 }

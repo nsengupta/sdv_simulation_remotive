@@ -2,7 +2,7 @@
 //!
 //! `RunReader::open` never trusts the manifest's declared schema version until it has parsed the
 //! manifest as an untyped `serde_json::Value`, extracted `schema_version`, and confirmed it is a
-//! deliberately supported version (v3 or v4) — see `docs/DESIGN.md`. Only then
+//! deliberately supported version (v1–v5) — see `docs/DESIGN.md`. Only then
 //! does it deserialize the concrete `ManifestV1` and validate the two declared stream filenames.
 //! Every stream row is re-validated the same way as it is read, one line at a time, so corrupt or
 //! foreign artifacts fail with contextual errors instead of silently loading.
