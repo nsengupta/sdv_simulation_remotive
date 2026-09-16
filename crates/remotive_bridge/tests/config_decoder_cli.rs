@@ -1,5 +1,5 @@
 use remotive_bridge::cli::{
-    DEFAULT_BROKER_URL, DEFAULT_CAN_INTERFACE, DEFAULT_TICK_MS, parse_args,
+    DEFAULT_BROKER_URL, DEFAULT_CAN_INTERFACE, DEFAULT_RPM_CLAMP, DEFAULT_TICK_MS, parse_args,
 };
 use remotive_bridge::decoder::decode_boolean;
 use remotive_bridge::source::{
@@ -36,6 +36,32 @@ fn subscription_config_contains_exactly_three_ordered_signal_ids() {
     );
     assert!(!config.on_change);
     assert!(!config.initial_empty);
+}
+
+#[test]
+fn subscription_config_rejects_hello_world_signal_widening() {
+    let config = subscription_config();
+    let ids = config.signals.unwrap().signal_id;
+    assert_eq!(
+        ids.len(),
+        3,
+        "Phase III must not subscribe extra Hello World signals"
+    );
+    // Explicitly assert absence of common Hello World distractors by name.
+    let names: Vec<&str> = ids.iter().map(|id| id.name.as_str()).collect();
+    for distractor in [
+        "LowBeam",
+        "HighBeam",
+        "Brake",
+        "TurnStalk",
+        "Wiper",
+        "Speed",
+    ] {
+        assert!(
+            names.iter().all(|n| !n.contains(distractor)),
+            "unexpected distractor {distractor} in {names:?}"
+        );
+    }
 }
 
 #[test]
@@ -225,6 +251,8 @@ fn cli_defaults_and_overrides_are_emulator_compatible() {
     assert_eq!(defaults.can_interface, DEFAULT_CAN_INTERFACE);
     assert_eq!(defaults.tick, Duration::from_millis(DEFAULT_TICK_MS));
     assert_eq!(defaults.readings, None);
+    assert_eq!(defaults.rpm_clamp, DEFAULT_RPM_CLAMP);
+    assert_eq!(defaults.rpm_clamp, common::RPM_DRIVING_THRESHOLD);
 
     let args = parse_args([
         "--broker-url",
@@ -235,12 +263,15 @@ fn cli_defaults_and_overrides_are_emulator_compatible() {
         "250",
         "--readings",
         "3",
+        "--rpm-clamp",
+        "3000",
     ])
     .unwrap();
     assert_eq!(args.broker_url, "http://broker:50051");
     assert_eq!(args.can_interface, "can7");
     assert_eq!(args.tick, Duration::from_millis(250));
     assert_eq!(args.readings, NonZeroUsize::new(3));
+    assert_eq!(args.rpm_clamp, 3000);
 }
 
 #[test]
@@ -249,18 +280,37 @@ fn cli_rejects_empty_or_non_positive_values_and_unknown_flags() {
     assert!(parse_args(["--can-interface", ""]).is_err());
     assert!(parse_args(["--tick-ms", "0"]).is_err());
     assert!(parse_args(["--readings", "0"]).is_err());
+    assert!(parse_args(["--rpm-clamp", "not-a-number"]).is_err());
     assert!(parse_args(["--unknown"]).is_err());
 }
 
 #[tokio::test]
-async fn observation_rpm_stays_at_or_below_driving_threshold() {
-    let mut source = ProfileRpmSource::new(Duration::from_millis(1));
+async fn observation_rpm_stays_at_or_below_configured_clamp() {
+    let mut source = ProfileRpmSource::new(Duration::from_millis(1), DEFAULT_RPM_CLAMP);
     for _ in 0..200 {
         let rpm = source.next_rpm().await.unwrap();
         assert!(
-            rpm <= common::RPM_DRIVING_THRESHOLD,
-            "temporary observation profile must not enter Driving, got {rpm}"
+            rpm <= DEFAULT_RPM_CLAMP,
+            "default clamp must keep rpm ≤ {DEFAULT_RPM_CLAMP}, got {rpm}"
         );
         assert!(rpm >= common::RPM_IDLE);
     }
+}
+
+#[tokio::test]
+async fn observation_rpm_respects_raised_clamp() {
+    let clamp = 2500u16;
+    let mut source = ProfileRpmSource::new(Duration::from_millis(1), clamp);
+    let mut saw_above_driving = false;
+    for _ in 0..400 {
+        let rpm = source.next_rpm().await.unwrap();
+        assert!(rpm <= clamp, "rpm {rpm} exceeded clamp {clamp}");
+        if rpm > common::RPM_DRIVING_THRESHOLD {
+            saw_above_driving = true;
+        }
+    }
+    assert!(
+        saw_above_driving,
+        "raised clamp should allow profile above Idle driving threshold"
+    );
 }

@@ -1,7 +1,6 @@
 use crate::decoder::decode_boolean;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use common::RPM_DRIVING_THRESHOLD;
 use emulator::models::{PhysicalWorldModelConfig, RpmModel};
 use remotivelabs_broker::{
     Connection,
@@ -207,16 +206,18 @@ impl ObservationConnector for RemotiveConnector {
 pub struct ProfileRpmSource {
     model: RpmModel,
     current_rpm: u16,
+    rpm_clamp: u16,
     interval: tokio::time::Interval,
 }
 
 impl ProfileRpmSource {
-    pub fn new(tick: Duration) -> Self {
+    pub fn new(tick: Duration, rpm_clamp: u16) -> Self {
         let config = PhysicalWorldModelConfig::daytime_tunnel_profile().rpm;
-        let current_rpm = config.idle_rpm;
+        let current_rpm = config.idle_rpm.min(rpm_clamp);
         Self {
             model: RpmModel::new(config),
             current_rpm,
+            rpm_clamp,
             interval: tokio::time::interval(tick),
         }
     }
@@ -233,7 +234,7 @@ impl RpmSource for ProfileRpmSource {
         self.current_rpm = self
             .model
             .next_rpm(self.current_rpm, epoch)
-            .min(RPM_DRIVING_THRESHOLD);
+            .min(self.rpm_clamp);
         Ok(self.current_rpm)
     }
 }

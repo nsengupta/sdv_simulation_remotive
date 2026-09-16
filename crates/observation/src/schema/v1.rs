@@ -502,6 +502,8 @@ impl<'de> Deserialize<'de> for ObservedBoolV1 {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SccmContextV1 {
     pub hazard_button_on: ObservedBoolV1,
+    #[serde(default)]
+    pub hazard_mode_on: ObservedBoolV1,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -765,6 +767,7 @@ fn project_vehicle_context(ctx: &PublishedVehicleContext) -> VehicleContextV1 {
     VehicleContextV1 {
         sccm: SccmContextV1 {
             hazard_button_on: ctx.sccm.hazard_button_on.into(),
+            hazard_mode_on: ctx.sccm.hazard_mode_on.into(),
         },
         bcm: BcmContextV1 {
             state: project_bcm_state(ctx.bcm.state),
@@ -1034,6 +1037,7 @@ fn live_vehicle_context(ctx: &VehicleContextV1) -> PublishedVehicleContext {
     PublishedVehicleContext {
         sccm: PublishedSccmContext {
             hazard_button_on: ctx.sccm.hazard_button_on.into(),
+            hazard_mode_on: ctx.sccm.hazard_mode_on.into(),
         },
         bcm: PublishedBcmContext {
             state: live_bcm_state(ctx.bcm.state),

@@ -51,7 +51,7 @@ pub fn driver_pane(
         observed_pane_line(
             "Hazard: ",
             ledger
-                .map(|row| row.current_ctx.sccm.hazard_button_on)
+                .map(|row| row.current_ctx.sccm.hazard_mode_on)
                 .unwrap_or(PublishedObservedBool::Unknown),
             width,
         ),
@@ -110,28 +110,9 @@ fn format_notice_body(diagnostic: Option<&DiagnosticRecord>) -> String {
         DiagnosticKind::Boot => {
             format!("{} — Twin booting", format_level(d.level))
         }
-        DiagnosticKind::HeadlampActuationUnconfirmed { on, cause } => {
-            let dir = if *on { "ON" } else { "OFF" };
-            let why = match cause {
-                FrontHeadlampIncompleteCause::TimedOut => "timeout",
-                FrontHeadlampIncompleteCause::NegativeAck => "NACK",
-                _ => "unconfirmed",
-            };
-            format!(
-                "{} — Headlamp {dir} not confirmed ({why})",
-                format_level(d.level)
-            )
-        }
-        DiagnosticKind::RainChanged { raining } => format!(
-            "{} — Rain {}",
-            format_level(d.level),
-            if *raining { "detected" } else { "cleared" }
-        ),
-        DiagnosticKind::WiperMotionChanged { wiping } => format!(
-            "{} — Wipers {}",
-            format_level(d.level),
-            if *wiping { "active" } else { "stopped" }
-        ),
+        DiagnosticKind::HeadlampActuationUnconfirmed { .. }
+        | DiagnosticKind::RainChanged { .. }
+        | DiagnosticKind::WiperMotionChanged { .. } => "(no notice yet)".to_owned(),
         DiagnosticKind::ActuationFailure { action, error } => format!(
             "{} — Actuation failure ({action}: {error})",
             format_level(d.level)
@@ -309,6 +290,7 @@ mod tests {
         PublishedVehicleContext {
             sccm: PublishedSccmContext {
                 hazard_button_on: PublishedObservedBool::Unknown,
+                hazard_mode_on: PublishedObservedBool::Unknown,
             },
             bcm: PublishedBcmContext {
                 state: PublishedBcmState::Off,
@@ -412,8 +394,8 @@ mod tests {
             .unwrap()
             .text();
         let notice = notice.trim_end();
-        assert!(notice.contains("not confirmed"));
-        assert!(notice.contains("timeout"));
+        assert!(notice.contains("(no notice yet)"));
+        assert!(!notice.to_lowercase().contains("headlamp"));
         assert!(!notice.contains('✅'));
         assert!(!notice.contains('✓'));
     }
@@ -479,7 +461,7 @@ mod tests {
     #[test]
     fn driver_observed_lines_fit_narrow_and_normal_widths_without_lamp_confirmation() {
         let mut ledger = sample_ledger(10, 150, PublishedHeadlampState::On);
-        ledger.current_ctx.sccm.hazard_button_on = PublishedObservedBool::On;
+        ledger.current_ctx.sccm.hazard_mode_on = PublishedObservedBool::On;
         ledger.current_ctx.bcm.left_turn_request_on = PublishedObservedBool::On;
         ledger.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::On;
         for width in [24usize, 64] {
@@ -542,6 +524,15 @@ mod tests {
     }
 
     #[test]
+    fn driver_hazard_follows_mode_not_button_wire() {
+        let mut ledger = sample_ledger(10, 100, PublishedHeadlampState::Off);
+        ledger.current_ctx.sccm.hazard_button_on = PublishedObservedBool::Off;
+        ledger.current_ctx.sccm.hazard_mode_on = PublishedObservedBool::On;
+        let text = pane_text(&driver_pane(None, Some(&ledger), 64));
+        assert!(text.contains("Hazard: ON"), "{text}");
+    }
+
+    #[test]
     fn driver_shows_unknown_observed_signals_before_first_observation() {
         let ledger = sample_ledger(10, 100, PublishedHeadlampState::Off);
         let text = pane_text(&driver_pane(None, Some(&ledger), 64));
@@ -553,7 +544,7 @@ mod tests {
     #[test]
     fn driver_shows_on_off_combinations_for_hazard_left_and_right() {
         let mut hazard_on = sample_ledger(10, 100, PublishedHeadlampState::On);
-        hazard_on.current_ctx.sccm.hazard_button_on = PublishedObservedBool::On;
+        hazard_on.current_ctx.sccm.hazard_mode_on = PublishedObservedBool::On;
         hazard_on.current_ctx.bcm.left_turn_request_on = PublishedObservedBool::Off;
         hazard_on.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::On;
         let on_off = pane_text(&driver_pane(None, Some(&hazard_on), 64));
@@ -562,13 +553,69 @@ mod tests {
         assert!(on_off.contains("Right request: ON"), "{on_off}");
 
         let mut all_off = sample_ledger(10, 100, PublishedHeadlampState::Off);
-        all_off.current_ctx.sccm.hazard_button_on = PublishedObservedBool::Off;
+        all_off.current_ctx.sccm.hazard_mode_on = PublishedObservedBool::Off;
         all_off.current_ctx.bcm.left_turn_request_on = PublishedObservedBool::On;
         all_off.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::Off;
         let off_on = pane_text(&driver_pane(None, Some(&all_off), 64));
         assert!(off_on.contains("Hazard: OFF"), "{off_on}");
         assert!(off_on.contains("Left request: ON"), "{off_on}");
         assert!(off_on.contains("Right request: OFF"), "{off_on}");
+    }
+
+    #[test]
+    fn driver_attended_labels_are_exactly_speed_hazard_left_right() {
+        let mut ledger = sample_ledger(42, 150, PublishedHeadlampState::On);
+        ledger.current_ctx.sccm.hazard_mode_on = PublishedObservedBool::On;
+        ledger.current_ctx.bcm.left_turn_request_on = PublishedObservedBool::On;
+        ledger.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::On;
+        ledger.current_ctx.weather.raining = true;
+        ledger.current_ctx.visibility.ambient_lux = 999;
+        ledger.current_ctx.wiper.state = PublishedWiperState::Running;
+
+        let text = pane_text(&driver_pane(None, Some(&ledger), 64));
+        assert!(text.contains("Speed:"), "{text}");
+        assert!(text.contains("42/"), "{text}");
+        assert!(text.contains("Hazard: ON"), "{text}");
+        assert!(text.contains("Left request: ON"), "{text}");
+        assert!(text.contains("Right request: ON"), "{text}");
+
+        for forbidden in [
+            "Visibility:",
+            "Headlamps:",
+            "Headlamp:",
+            "Weather:",
+            "Wipers:",
+            "Ambient",
+            "lux",
+            "Raining",
+            "Rain ",
+        ] {
+            assert!(!text.contains(forbidden), "found {forbidden:?} in {text}");
+        }
+    }
+
+    #[test]
+    fn driver_notice_does_not_surface_unattended_domain_diagnostics() {
+        let ledger = sample_ledger(10, 100, PublishedHeadlampState::Off);
+        for kind in [
+            DiagnosticKind::RainChanged { raining: true },
+            DiagnosticKind::WiperMotionChanged { wiping: true },
+            DiagnosticKind::HeadlampActuationUnconfirmed {
+                on: true,
+                cause: FrontHeadlampIncompleteCause::TimedOut,
+            },
+        ] {
+            let pane = driver_pane(Some(&sample_diag(kind)), Some(&ledger), 64);
+            let notice = pane
+                .lines
+                .iter()
+                .find(|l| l.role == LineRole::Notice)
+                .expect("active ledger should render Notice line")
+                .text();
+            assert!(!notice.to_lowercase().contains("rain"), "{notice}");
+            assert!(!notice.to_lowercase().contains("wiper"), "{notice}");
+            assert!(!notice.to_lowercase().contains("headlamp"), "{notice}");
+        }
     }
 
     #[test]

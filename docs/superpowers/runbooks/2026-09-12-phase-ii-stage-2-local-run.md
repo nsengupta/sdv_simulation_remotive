@@ -317,8 +317,9 @@ section 3c running, then continue below.
 
 ### 3e. Start Gateway
 
-The bridge temporarily clamps RPM at `RPM_DRIVING_THRESHOLD` (1000), so the
-Twin stays in `Idle`. `UpdateRpm` self-loops can still appear; they are not
+Default bridge RPM uses `--rpm-clamp 1000` (`RPM_DRIVING_THRESHOLD`), so the
+Twin stays in `Idle`. Raise it (for example `--rpm-clamp 3000`) when the demo
+needs motion / `Driving`. `UpdateRpm` self-loops can still appear; they are not
 pytest. Restart Gateway with those lines stripped if they get in the way.
 `--line-buffered` is required because `grep` otherwise waits for a full block:
 
@@ -359,7 +360,10 @@ Ctrl+C the old bridge, keep this Gateway, start a new bridge, wait for
 
 ```bash
 cd "$TWIN_REPO"
-cargo run -p remotive_bridge -- --broker-url http://127.0.0.1:50051 --can-interface vcan0
+cargo run -p remotive_bridge -- \
+  --broker-url http://127.0.0.1:50051 \
+  --can-interface vcan0
+# Optional motion: add --rpm-clamp 3000 (default 1000 keeps Twin Idle)
 ```
 
 Required before any Twin `PowerOn`:
@@ -424,10 +428,10 @@ TimerTick                  ...  sccm.hazard_button_on=true  bcm.left_turn_reques
 ```
 
 Left and right order can swap. The `completed_duplicates` counts are Restbus
-repeats of OFF that were not ledgered. Operational state should stay `Idle`
-because the bridge now clamps RPM at the driving threshold. There must be no
-`SetTurnLights` action. Unfiltered `UpdateRpm` lines may later echo
-`hazard_button_on=true`; that is context, not a new observation.
+repeats of OFF that were not ledgered. With the default `--rpm-clamp 1000`,
+operational state stays `Idle`. There must be no `SetTurnLights` action.
+Unfiltered `UpdateRpm` lines may later echo `hazard_button_on=true`; that is
+context, not a new observation.
 
 ### 3h. Stop the bridge cleanly
 

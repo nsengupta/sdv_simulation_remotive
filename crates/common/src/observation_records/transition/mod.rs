@@ -420,12 +420,14 @@ impl From<&crate::vehicle_state::WiperContext> for PublishedWiperContext {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublishedSccmContext {
     pub hazard_button_on: PublishedObservedBool,
+    pub hazard_mode_on: PublishedObservedBool,
 }
 
 impl From<&crate::vehicle_state::SccmContext> for PublishedSccmContext {
     fn from(s: &crate::vehicle_state::SccmContext) -> Self {
         Self {
             hazard_button_on: s.hazard_button.into(),
+            hazard_mode_on: s.hazard_mode.into(),
         }
     }
 }

@@ -48,6 +48,7 @@ pub fn sample_ledger() -> PublishedTransitionRecord {
     let context = PublishedVehicleContext {
         sccm: PublishedSccmContext {
             hazard_button_on: PublishedObservedBool::Unknown,
+            hazard_mode_on: PublishedObservedBool::Off,
         },
         bcm: PublishedBcmContext {
             state: PublishedBcmState::Ready,

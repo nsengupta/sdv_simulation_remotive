@@ -1,14 +1,17 @@
 use anyhow::{Context, Result, bail};
+use common::RPM_DRIVING_THRESHOLD;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
 pub const DEFAULT_BROKER_URL: &str = "http://127.0.0.1:50051";
 pub const DEFAULT_CAN_INTERFACE: &str = "vcan0";
 pub const DEFAULT_TICK_MS: u64 = emulator::cli::DEFAULT_TICK_MS;
+/// Default RPM ceiling (keeps Twin Idle: Driving needs rpm > this value).
+pub const DEFAULT_RPM_CLAMP: u16 = RPM_DRIVING_THRESHOLD;
 
 const USAGE: &str = "\
 usage: remotive_bridge [--broker-url <url>] [--can-interface <iface>]
-                       [--tick-ms <ms>] [--readings <N>]
+                       [--tick-ms <ms>] [--readings <N>] [--rpm-clamp <rpm>]
 ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,6 +20,8 @@ pub struct BridgeArgs {
     pub can_interface: String,
     pub tick: Duration,
     pub readings: Option<NonZeroUsize>,
+    /// Cap for the bridge RPM profile (`profile.min(rpm_clamp)`).
+    pub rpm_clamp: u16,
 }
 
 impl Default for BridgeArgs {
@@ -26,6 +31,7 @@ impl Default for BridgeArgs {
             can_interface: DEFAULT_CAN_INTERFACE.into(),
             tick: Duration::from_millis(DEFAULT_TICK_MS),
             readings: None,
+            rpm_clamp: DEFAULT_RPM_CLAMP,
         }
     }
 }
@@ -68,6 +74,13 @@ where
                     .with_context(|| format!("invalid --readings value {raw:?}"))?;
                 parsed.readings =
                     Some(NonZeroUsize::new(count).context("--readings must be greater than zero")?);
+            }
+            "--rpm-clamp" => {
+                index += 1;
+                let raw = values.get(index).context("missing value for --rpm-clamp")?;
+                parsed.rpm_clamp = raw
+                    .parse::<u16>()
+                    .with_context(|| format!("invalid --rpm-clamp value {raw:?}"))?;
             }
             other => bail!("unknown argument {other:?}\n{USAGE}"),
         }

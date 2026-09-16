@@ -9,18 +9,25 @@ use observation::schema::v1::{
 };
 
 #[test]
-fn current_schema_version_is_v5() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 5);
+fn current_schema_version_is_v6() {
+    assert_eq!(CURRENT_SCHEMA_VERSION, 6);
 }
 
 #[test]
-fn v5_initial_observed_values_serialize_as_unknown() {
+fn v5_sccm_json_without_hazard_mode_defaults_off() {
+    let sccm: SccmContextV1 =
+        serde_json::from_str(r#"{"hazard_button_on":"on"}"#).unwrap();
+    assert_eq!(sccm.hazard_mode_on, ObservedBoolV1::Off);
+}
+
+#[test]
+fn v6_initial_observed_values_serialize_as_unknown() {
     let metadata = support::fixed_run_metadata();
     let live = support::sample_ledger();
     let envelope = ledger_envelope(&metadata, &live).expect("sample ledger projection");
     let json = serde_json::to_value(&envelope).expect("serialize v5 envelope");
 
-    assert_eq!(json["schema_version"], 5);
+    assert_eq!(json["schema_version"], 6);
     assert_eq!(
         json["payload"]["old_ctx"]["sccm"]["hazard_button_on"],
         "unknown"
@@ -65,7 +72,7 @@ fn observed_events_round_trip_losslessly() {
         live.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::Off;
 
         let envelope = ledger_envelope(&metadata, &live).expect("observed ledger projection");
-        assert_eq!(envelope.schema_version, 5);
+        assert_eq!(envelope.schema_version, 6);
         assert_eq!(envelope.payload.event, expected_dto);
         assert_eq!(
             envelope.payload.current_ctx.sccm.hazard_button_on,

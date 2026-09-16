@@ -39,7 +39,7 @@ pub fn engineer_pane(ledger: Option<&PublishedTransitionRecord>, width: usize) -
             LineRole::EngineerAssembly,
             &format!(
                 "  SCCM: Hazard {}",
-                format_observed_bool(row.current_ctx.sccm.hazard_button_on)
+                format_observed_bool(row.current_ctx.sccm.hazard_mode_on)
             ),
             width,
         ),
@@ -135,6 +135,7 @@ mod tests {
         PublishedVehicleContext {
             sccm: PublishedSccmContext {
                 hazard_button_on: PublishedObservedBool::Unknown,
+                hazard_mode_on: PublishedObservedBool::Unknown,
             },
             bcm: PublishedBcmContext {
                 state: PublishedBcmState::Off,
@@ -195,6 +196,15 @@ mod tests {
     }
 
     #[test]
+    fn engineer_sccm_line_shows_mode() {
+        let mut ledger = sample_ledger();
+        ledger.current_ctx.sccm.hazard_button_on = PublishedObservedBool::Off;
+        ledger.current_ctx.sccm.hazard_mode_on = PublishedObservedBool::On;
+        let text = pane_text(&engineer_pane(Some(&ledger), 64));
+        assert!(text.contains("SCCM: Hazard ON"), "{text}");
+    }
+
+    #[test]
     fn engineer_shows_sccm_bcm_readiness_and_unknown_latest_values() {
         let text = pane_text(&engineer_pane(Some(&sample_ledger()), 64));
         assert!(text.contains("SCCM: Hazard UNKNOWN"), "{text}");
@@ -206,13 +216,35 @@ mod tests {
     #[test]
     fn engineer_shows_sccm_bcm_ready_and_on_off_latest_values() {
         let mut row = sample_ledger();
-        row.current_ctx.sccm.hazard_button_on = PublishedObservedBool::On;
+        row.current_ctx.sccm.hazard_mode_on = PublishedObservedBool::On;
         row.current_ctx.bcm.state = PublishedBcmState::Ready;
         row.current_ctx.bcm.left_turn_request_on = PublishedObservedBool::On;
         row.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::Off;
         let text = pane_text(&engineer_pane(Some(&row), 64));
         assert!(text.contains("SCCM: Hazard ON"), "{text}");
         assert!(text.contains("BCM: Ready  Left ON  Right OFF"), "{text}");
+    }
+
+    #[test]
+    fn engineer_attended_assemblies_are_only_sccm_hazard_and_bcm_turns() {
+        let mut ledger = sample_ledger();
+        ledger.current_ctx.sccm.hazard_mode_on = PublishedObservedBool::On;
+        ledger.current_ctx.bcm.state = PublishedBcmState::Ready;
+        ledger.current_ctx.bcm.left_turn_request_on = PublishedObservedBool::On;
+        ledger.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::On;
+        ledger.current_ctx.visibility.ambient_lux = 999;
+        ledger.current_ctx.weather.raining = true;
+        ledger.current_ctx.headlamp.state = PublishedHeadlampState::On;
+        ledger.current_ctx.wiper.state = PublishedWiperState::Running;
+
+        let text = pane_text(&engineer_pane(Some(&ledger), 64));
+        assert!(text.contains("SCCM: Hazard ON"), "{text}");
+        assert!(text.contains("BCM: Ready"), "{text}");
+        assert!(text.contains("Left ON"), "{text}");
+        assert!(text.contains("Right ON"), "{text}");
+        for forbidden in ["Headlamp:", "Wiper:", "Weather:", "Visibility:", "lux"] {
+            assert!(!text.contains(forbidden), "found {forbidden:?} in {text}");
+        }
     }
 
     #[test]

@@ -781,7 +781,7 @@ mod tests {
         let mut state = DashboardState::default();
         let mut row = sample_ledger_row();
         row.event = PublishedFsmEvent::HazardButtonObserved(true);
-        row.current_ctx.sccm.hazard_button_on = common::facade::PublishedObservedBool::On;
+        row.current_ctx.sccm.hazard_mode_on = common::facade::PublishedObservedBool::On;
         row.current_ctx.bcm.state = common::facade::PublishedBcmState::Ready;
         row.current_ctx.bcm.left_turn_request_on = common::facade::PublishedObservedBool::On;
         row.current_ctx.bcm.right_turn_request_on = common::facade::PublishedObservedBool::Off;
@@ -839,6 +839,7 @@ mod tests {
         PublishedVehicleContext {
             sccm: PublishedSccmContext {
                 hazard_button_on: PublishedObservedBool::Unknown,
+                hazard_mode_on: PublishedObservedBool::Unknown,
             },
             bcm: PublishedBcmContext {
                 state: PublishedBcmState::Off,

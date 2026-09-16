@@ -3,9 +3,9 @@ use std::time::Instant;
 use crate::fsm::{DomainAction, FsmEvent, FsmState, RawTransitionRecord};
 use crate::observation_records::transition::{
     PublishedBcmState, PublishedDomainAction, PublishedFsmEvent, PublishedObservedBool,
-    PublishedTransitionRecord, SessionClock,
+    PublishedSccmContext, PublishedTransitionRecord, SessionClock,
 };
-use crate::vehicle_state::{BcmState, VehicleContext};
+use crate::vehicle_state::{BcmState, ObservedBool, SccmContext, VehicleContext};
 
 fn project(raw: RawTransitionRecord) -> PublishedTransitionRecord {
     PublishedTransitionRecord::project(&raw, "hazard-car", 1, &SessionClock::capture())
@@ -26,6 +26,14 @@ fn idle_record(
         current_ctx,
         actions,
     }
+}
+
+#[test]
+fn published_sccm_maps_mode_from_context() {
+    let mut ctx = SccmContext::default();
+    ctx.hazard_mode = ObservedBool::On;
+    let published = PublishedSccmContext::from(&ctx);
+    assert_eq!(published.hazard_mode_on, PublishedObservedBool::On);
 }
 
 #[test]

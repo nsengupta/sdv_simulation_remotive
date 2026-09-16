@@ -27,8 +27,9 @@ fn format_transition_record(record: &PublishedTransitionRecord, color: bool) -> 
     };
     let headlamp = format!("headlamp={:?}", record.current_ctx.headlamp.state);
     let hazard = format!(
-        "sccm.hazard_button={}  bcm.left_turn_request={}  bcm.right_turn_request={}",
+        "sccm.hazard_button={}  sccm.hazard_mode={}  bcm.left_turn_request={}  bcm.right_turn_request={}",
         format_observed_bool(record.current_ctx.sccm.hazard_button_on),
+        format_observed_bool(record.current_ctx.sccm.hazard_mode_on),
         format_observed_bool(record.current_ctx.bcm.left_turn_request_on),
         format_observed_bool(record.current_ctx.bcm.right_turn_request_on),
     );
@@ -150,6 +151,7 @@ mod tests {
         PublishedVehicleContext {
             sccm: PublishedSccmContext {
                 hazard_button_on: PublishedObservedBool::Unknown,
+                hazard_mode_on: PublishedObservedBool::Off,
             },
             bcm: PublishedBcmContext {
                 state: PublishedBcmState::Off,
@@ -203,6 +205,7 @@ mod tests {
         let line = format_transition_record(&record, false);
 
         assert!(line.contains("sccm.hazard_button=on"));
+        assert!(line.contains("sccm.hazard_mode=off"));
         assert!(line.contains("bcm.left_turn_request=on"));
         assert!(line.contains("bcm.right_turn_request=on"));
     }
@@ -219,6 +222,10 @@ mod tests {
         );
         assert!(
             hazard_line.contains("sccm.hazard_button=on"),
+            "{hazard_line}"
+        );
+        assert!(
+            hazard_line.contains("sccm.hazard_mode=off"),
             "{hazard_line}"
         );
 
@@ -247,6 +254,19 @@ mod tests {
             right_line.contains("bcm.right_turn_request=on"),
             "{right_line}"
         );
+    }
+
+    #[test]
+    fn plain_format_shows_latched_mode_when_button_wire_is_off() {
+        let mut record = sample_record();
+        record.event = PublishedFsmEvent::HazardButtonObserved(false);
+        record.current_ctx.sccm.hazard_button_on = PublishedObservedBool::Off;
+        record.current_ctx.sccm.hazard_mode_on = PublishedObservedBool::On;
+
+        let line = format_transition_record(&record, false);
+
+        assert!(line.contains("sccm.hazard_button=off"), "{line}");
+        assert!(line.contains("sccm.hazard_mode=on"), "{line}");
     }
 
     #[test]

@@ -81,7 +81,7 @@ pub fn format_ledger_line(row: &PublishedTransitionRecord, width: usize, newest:
         format_event(&row.event),
         format_state(&row.old_state),
         format_state(&row.next_state),
-        format_observed_bool(row.current_ctx.sccm.hazard_button_on),
+        format_observed_bool(row.current_ctx.sccm.hazard_mode_on),
         format_bcm_state(row.current_ctx.bcm.state),
         format_observed_bool(row.current_ctx.bcm.left_turn_request_on),
         format_observed_bool(row.current_ctx.bcm.right_turn_request_on),
@@ -172,6 +172,7 @@ mod tests {
         PublishedVehicleContext {
             sccm: PublishedSccmContext {
                 hazard_button_on: PublishedObservedBool::Unknown,
+                hazard_mode_on: PublishedObservedBool::Unknown,
             },
             bcm: PublishedBcmContext {
                 state: PublishedBcmState::Off,
@@ -310,7 +311,7 @@ mod tests {
         assert!(unknown_line.contains("L=UNKNOWN"), "{unknown_line}");
         assert!(unknown_line.contains("R=UNKNOWN"), "{unknown_line}");
 
-        unknown.current_ctx.sccm.hazard_button_on = PublishedObservedBool::On;
+        unknown.current_ctx.sccm.hazard_mode_on = PublishedObservedBool::On;
         unknown.current_ctx.bcm.state = PublishedBcmState::Ready;
         unknown.current_ctx.bcm.left_turn_request_on = PublishedObservedBool::On;
         unknown.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::Off;

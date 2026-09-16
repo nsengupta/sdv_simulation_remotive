@@ -69,7 +69,7 @@ fn unix_timestamp_v1_display_uses_readable_utc_layout() {
 fn diagnostic_projection_uses_snake_case_level_and_numeric_timestamp() {
     let entry = diagnostic_envelope(&fixed_run_metadata(), &sample_diagnostic()).unwrap();
     let json = serde_json::to_value(entry).unwrap();
-    assert_eq!(json["schema_version"], 5);
+    assert_eq!(json["schema_version"], 6);
     assert_eq!(json["payload"]["level"], "warning");
     assert_eq!(json["payload"]["kind"]["type"], "text");
     assert_eq!(json["payload"]["kind"]["text"], "fixed warning");
@@ -84,7 +84,7 @@ fn diagnostic_projection_uses_snake_case_level_and_numeric_timestamp() {
 fn ledger_projection_is_lossless_and_explicitly_tagged() {
     let entry = ledger_envelope(&fixed_run_metadata(), &sample_ledger()).unwrap();
     let json = serde_json::to_value(entry).unwrap();
-    assert_eq!(json["schema_version"], 5);
+    assert_eq!(json["schema_version"], 6);
     assert_eq!(
         json["payload"]["session_started_at"],
         numeric_ts(SESSION_SECONDS, 0)

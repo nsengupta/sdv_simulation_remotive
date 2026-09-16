@@ -118,7 +118,7 @@ fn assert_tui_dtos(
     bcm: PublishedBcmState,
 ) {
     assert_eq!(
-        tui_observed_label(row.current_ctx.sccm.hazard_button_on),
+        tui_observed_label(row.current_ctx.sccm.hazard_mode_on),
         hazard
     );
     assert_eq!(
@@ -170,7 +170,7 @@ async fn observed_hazard_left_and_right_cross_gateway_twin_ledger_and_tui_dtos()
     assert_no_twin_actuation(&bcm_ready);
     assert_tui_dtos(
         &bcm_ready,
-        "UNKNOWN",
+        "OFF",
         "UNKNOWN",
         "UNKNOWN",
         PublishedBcmState::Ready,
@@ -197,6 +197,10 @@ async fn observed_hazard_left_and_right_cross_gateway_twin_ledger_and_tui_dtos()
     );
     assert_eq!(
         hazard_off.current_ctx.sccm.hazard_button_on,
+        PublishedObservedBool::Off
+    );
+    assert_eq!(
+        hazard_off.current_ctx.sccm.hazard_mode_on,
         PublishedObservedBool::Off
     );
     assert_eq!(
@@ -231,10 +235,74 @@ async fn observed_hazard_left_and_right_cross_gateway_twin_ledger_and_tui_dtos()
         PublishedObservedBool::On
     );
     assert_eq!(
+        hazard_on.current_ctx.sccm.hazard_mode_on,
+        PublishedObservedBool::On
+    );
+    assert_eq!(
         hazard_on.current_ctx.bcm.left_turn_request_on,
         PublishedObservedBool::Unknown
     );
     assert_observation_actions_empty(&hazard_on);
+
+    submit_observed(&controller, ObservedEcuSignal::HazardButton(false)).await;
+    let hazard_wire_off = recv_row(&mut transition_rx).await;
+    assert_eq!(
+        hazard_wire_off.event,
+        PublishedFsmEvent::HazardButtonObserved(false)
+    );
+    assert_eq!(
+        hazard_wire_off.current_ctx.sccm.hazard_button_on,
+        PublishedObservedBool::Off
+    );
+    assert_eq!(
+        hazard_wire_off.current_ctx.sccm.hazard_mode_on,
+        PublishedObservedBool::On
+    );
+    assert_observation_actions_empty(&hazard_wire_off);
+    assert_tui_dtos(
+        &hazard_wire_off,
+        "ON",
+        "UNKNOWN",
+        "UNKNOWN",
+        PublishedBcmState::Ready,
+    );
+
+    let after_pulse = controller
+        .get_snapshot(Some(Duration::from_millis(300)))
+        .await
+        .expect("hazard pulse-off snapshot");
+    assert_eq!(after_pulse.context().sccm.hazard_button, ObservedBool::Off);
+    assert_eq!(after_pulse.context().sccm.hazard_mode, ObservedBool::On);
+
+    submit_observed(&controller, ObservedEcuSignal::HazardButton(true)).await;
+    let hazard_second_on = recv_row(&mut transition_rx).await;
+    assert_eq!(
+        hazard_second_on.event,
+        PublishedFsmEvent::HazardButtonObserved(true)
+    );
+    assert_eq!(
+        hazard_second_on.current_ctx.sccm.hazard_button_on,
+        PublishedObservedBool::On
+    );
+    assert_eq!(
+        hazard_second_on.current_ctx.sccm.hazard_mode_on,
+        PublishedObservedBool::Off
+    );
+    assert_observation_actions_empty(&hazard_second_on);
+    assert_tui_dtos(
+        &hazard_second_on,
+        "OFF",
+        "UNKNOWN",
+        "UNKNOWN",
+        PublishedBcmState::Ready,
+    );
+
+    let after_second = controller
+        .get_snapshot(Some(Duration::from_millis(300)))
+        .await
+        .expect("second hazard edge snapshot");
+    assert_eq!(after_second.context().sccm.hazard_button, ObservedBool::On);
+    assert_eq!(after_second.context().sccm.hazard_mode, ObservedBool::Off);
 
     submit_observed(&controller, ObservedEcuSignal::LeftTurnRequest(false)).await;
     let left_off = recv_row(&mut transition_rx).await;
@@ -313,7 +381,7 @@ async fn observed_hazard_left_and_right_cross_gateway_twin_ledger_and_tui_dtos()
         PublishedObservedBool::On
     );
     assert_observation_actions_empty(&right_on);
-    assert_tui_dtos(&right_on, "ON", "ON", "ON", PublishedBcmState::Ready);
+    assert_tui_dtos(&right_on, "OFF", "ON", "ON", PublishedBcmState::Ready);
 
     submit_observed(&controller, ObservedEcuSignal::HazardButton(true)).await;
     submit_observed(&controller, ObservedEcuSignal::LeftTurnRequest(true)).await;
@@ -323,6 +391,8 @@ async fn observed_hazard_left_and_right_cross_gateway_twin_ledger_and_tui_dtos()
     let observation_rows = [
         &hazard_off,
         &hazard_on,
+        &hazard_wire_off,
+        &hazard_second_on,
         &left_off,
         &right_off,
         &left_on,
@@ -340,6 +410,7 @@ async fn observed_hazard_left_and_right_cross_gateway_twin_ledger_and_tui_dtos()
         .await
         .expect("observed snapshot");
     assert_eq!(snapshot.context().sccm.hazard_button, ObservedBool::On);
+    assert_eq!(snapshot.context().sccm.hazard_mode, ObservedBool::Off);
     assert_eq!(snapshot.context().bcm.left_turn_request, ObservedBool::On);
     assert_eq!(snapshot.context().bcm.right_turn_request, ObservedBool::On);
     assert_eq!(snapshot.context().bcm.state, BcmState::Ready);
@@ -379,7 +450,11 @@ async fn observed_hazard_left_and_right_cross_gateway_twin_ledger_and_tui_dtos()
     );
     let last = last.expect("shutdown must publish at least one row");
     assert_eq!(last.next_state, PublishedFsmState::Off);
-    assert_tui_dtos(&last, "ON", "ON", "ON", PublishedBcmState::Off);
+    assert_eq!(
+        last.current_ctx.sccm.hazard_mode_on,
+        PublishedObservedBool::Off
+    );
+    assert_tui_dtos(&last, "OFF", "ON", "ON", PublishedBcmState::Off);
 
     let off = controller
         .get_snapshot(Some(Duration::from_millis(300)))
@@ -388,6 +463,7 @@ async fn observed_hazard_left_and_right_cross_gateway_twin_ledger_and_tui_dtos()
     assert_eq!(*off.current_state(), FsmState::Off);
     assert_eq!(off.context().bcm.state, BcmState::Off);
     assert_eq!(off.context().sccm.hazard_button, ObservedBool::On);
+    assert_eq!(off.context().sccm.hazard_mode, ObservedBool::Off);
     assert_eq!(off.context().bcm.left_turn_request, ObservedBool::On);
     assert_eq!(off.context().bcm.right_turn_request, ObservedBool::On);
     assert!(

@@ -9,7 +9,7 @@ async fn main() -> Result<()> {
     let args = parse_args(std::env::args().skip(1))?;
 
     let mut sink = SocketCanSink::open(&args.can_interface)?;
-    let mut rpm = ProfileRpmSource::new(args.tick);
+    let mut rpm = ProfileRpmSource::new(args.tick, args.rpm_clamp);
     let mut shutdown = CtrlCShutdown;
 
     run_connected_session(
