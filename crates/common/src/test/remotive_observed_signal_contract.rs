@@ -1,6 +1,9 @@
 //! Contract tests for independent Remotive observations on strict internal CAN carriers.
 
-use crate::signals::{ID_HAZARD, ID_LEFT_TURN_REQUEST, ID_RIGHT_TURN_REQUEST, ObservedEcuSignal};
+use crate::signals::{
+    ID_HAZARD, ID_LEFT_LOW_BEAM_STATUS, ID_LEFT_TURN_REQUEST, ID_RIGHT_LOW_BEAM_STATUS,
+    ID_RIGHT_TURN_REQUEST, ObservedEcuSignal,
+};
 use socketcan::{CanFrame, EmbeddedFrame, ExtendedId, Frame, StandardId};
 
 fn standard_frame(id: u16, data: &[u8]) -> CanFrame {
@@ -42,6 +45,30 @@ fn remotive_right_request_has_an_independent_internal_carrier() {
 }
 
 #[test]
+fn remotive_left_low_beam_status_encodes_and_decodes_ok_and_fail() {
+    for (ok, payload) in [(true, [1, 0]), (false, [0, 0])] {
+        let signal = ObservedEcuSignal::LeftLowBeamStatus(ok);
+        let frame = signal.to_can_frame().expect("encode left low-beam status");
+
+        assert_eq!(frame.raw_id(), ID_LEFT_LOW_BEAM_STATUS as u32);
+        assert_eq!(frame.data(), payload);
+        assert_eq!(ObservedEcuSignal::from_can_frame(&frame), Some(signal));
+    }
+}
+
+#[test]
+fn remotive_right_low_beam_status_encodes_and_decodes_ok_and_fail() {
+    for (ok, payload) in [(true, [1, 0]), (false, [0, 0])] {
+        let signal = ObservedEcuSignal::RightLowBeamStatus(ok);
+        let frame = signal.to_can_frame().expect("encode right low-beam status");
+
+        assert_eq!(frame.raw_id(), ID_RIGHT_LOW_BEAM_STATUS as u32);
+        assert_eq!(frame.data(), payload);
+        assert_eq!(ObservedEcuSignal::from_can_frame(&frame), Some(signal));
+    }
+}
+
+#[test]
 fn every_observed_signal_round_trips_both_boolean_values() {
     for signal in [
         ObservedEcuSignal::HazardButton(false),
@@ -50,6 +77,10 @@ fn every_observed_signal_round_trips_both_boolean_values() {
         ObservedEcuSignal::LeftTurnRequest(true),
         ObservedEcuSignal::RightTurnRequest(false),
         ObservedEcuSignal::RightTurnRequest(true),
+        ObservedEcuSignal::LeftLowBeamStatus(false),
+        ObservedEcuSignal::LeftLowBeamStatus(true),
+        ObservedEcuSignal::RightLowBeamStatus(false),
+        ObservedEcuSignal::RightLowBeamStatus(true),
     ] {
         let frame = signal.to_can_frame().expect("encode observation");
         assert_eq!(ObservedEcuSignal::from_can_frame(&frame), Some(signal));
@@ -58,7 +89,13 @@ fn every_observed_signal_round_trips_both_boolean_values() {
 
 #[test]
 fn observed_signal_decoder_rejects_invalid_value_and_reserved_byte() {
-    for id in [ID_HAZARD, ID_LEFT_TURN_REQUEST, ID_RIGHT_TURN_REQUEST] {
+    for id in [
+        ID_HAZARD,
+        ID_LEFT_TURN_REQUEST,
+        ID_RIGHT_TURN_REQUEST,
+        ID_LEFT_LOW_BEAM_STATUS,
+        ID_RIGHT_LOW_BEAM_STATUS,
+    ] {
         assert_eq!(
             ObservedEcuSignal::from_can_frame(&standard_frame(id, &[2, 0])),
             None
@@ -72,7 +109,13 @@ fn observed_signal_decoder_rejects_invalid_value_and_reserved_byte() {
 
 #[test]
 fn observed_signal_decoder_requires_exactly_two_payload_bytes() {
-    for id in [ID_HAZARD, ID_LEFT_TURN_REQUEST, ID_RIGHT_TURN_REQUEST] {
+    for id in [
+        ID_HAZARD,
+        ID_LEFT_TURN_REQUEST,
+        ID_RIGHT_TURN_REQUEST,
+        ID_LEFT_LOW_BEAM_STATUS,
+        ID_RIGHT_LOW_BEAM_STATUS,
+    ] {
         for payload in [&[][..], &[1][..], &[1, 0, 0][..]] {
             assert_eq!(
                 ObservedEcuSignal::from_can_frame(&standard_frame(id, payload)),
@@ -84,7 +127,13 @@ fn observed_signal_decoder_requires_exactly_two_payload_bytes() {
 
 #[test]
 fn observed_signal_decoder_rejects_extended_ids() {
-    for id in [ID_HAZARD, ID_LEFT_TURN_REQUEST, ID_RIGHT_TURN_REQUEST] {
+    for id in [
+        ID_HAZARD,
+        ID_LEFT_TURN_REQUEST,
+        ID_RIGHT_TURN_REQUEST,
+        ID_LEFT_LOW_BEAM_STATUS,
+        ID_RIGHT_LOW_BEAM_STATUS,
+    ] {
         let frame = CanFrame::new(
             ExtendedId::new(id as u32).expect("extended CAN id"),
             &[1, 0],

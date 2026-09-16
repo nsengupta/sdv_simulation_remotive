@@ -10,6 +10,8 @@ pub const ID_RAIN_DETECTED: u16 = 0x104;
 pub const ID_HAZARD: u16 = 0x105;
 pub const ID_LEFT_TURN_REQUEST: u16 = 0x106;
 pub const ID_RIGHT_TURN_REQUEST: u16 = 0x107;
+pub const ID_LEFT_LOW_BEAM_STATUS: u16 = 0x108;
+pub const ID_RIGHT_LOW_BEAM_STATUS: u16 = 0x109;
 
 /// A lifecycle request decoded from an external ingress carrier.
 ///
@@ -101,6 +103,8 @@ pub enum ObservedEcuSignal {
     HazardButton(bool),
     LeftTurnRequest(bool),
     RightTurnRequest(bool),
+    LeftLowBeamStatus(bool),
+    RightLowBeamStatus(bool),
 }
 
 impl ObservedEcuSignal {
@@ -119,6 +123,8 @@ impl ObservedEcuSignal {
             ID_HAZARD => Some(Self::HazardButton(value)),
             ID_LEFT_TURN_REQUEST => Some(Self::LeftTurnRequest(value)),
             ID_RIGHT_TURN_REQUEST => Some(Self::RightTurnRequest(value)),
+            ID_LEFT_LOW_BEAM_STATUS => Some(Self::LeftLowBeamStatus(value)),
+            ID_RIGHT_LOW_BEAM_STATUS => Some(Self::RightLowBeamStatus(value)),
             _ => None,
         }
     }
@@ -129,6 +135,8 @@ impl ObservedEcuSignal {
             Self::HazardButton(value) => (ID_HAZARD, value),
             Self::LeftTurnRequest(value) => (ID_LEFT_TURN_REQUEST, value),
             Self::RightTurnRequest(value) => (ID_RIGHT_TURN_REQUEST, value),
+            Self::LeftLowBeamStatus(value) => (ID_LEFT_LOW_BEAM_STATUS, value),
+            Self::RightLowBeamStatus(value) => (ID_RIGHT_LOW_BEAM_STATUS, value),
         };
         let id = StandardId::new(id).expect("observed ECU CAN ID is a valid standard ID");
         CanFrame::new(id, &[value as u8, 0]).ok_or_else(|| {

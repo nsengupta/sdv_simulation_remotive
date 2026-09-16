@@ -119,11 +119,39 @@ mod tests {
     }
 
     #[test]
+    fn observed_left_low_beam_status_frame_maps_to_twin_observed_ecu() {
+        let frame = ObservedEcuSignal::LeftLowBeamStatus(true)
+            .to_can_frame()
+            .expect("encode observed left low-beam status");
+
+        assert!(matches!(
+            can_frame_to_twin_ingress(&frame),
+            Some(TwinIngressEvent::ObservedEcu(
+                ObservedEcuSignal::LeftLowBeamStatus(true)
+            ))
+        ));
+    }
+
+    #[test]
+    fn observed_right_low_beam_status_frame_maps_to_twin_observed_ecu() {
+        let frame = ObservedEcuSignal::RightLowBeamStatus(false)
+            .to_can_frame()
+            .expect("encode observed right low-beam status");
+
+        assert!(matches!(
+            can_frame_to_twin_ingress(&frame),
+            Some(TwinIngressEvent::ObservedEcu(
+                ObservedEcuSignal::RightLowBeamStatus(false)
+            ))
+        ));
+    }
+
+    #[test]
     fn malformed_observed_ids_and_dlcs_are_not_twin_ingress() {
         let unknown = CanFrame::new(StandardId::new(0x7ff).unwrap(), &[1, 0]).unwrap();
         assert!(can_frame_to_twin_ingress(&unknown).is_none());
 
-        for id in [0x105, 0x106, 0x107] {
+        for id in [0x105, 0x106, 0x107, 0x108, 0x109] {
             for data in [&[][..], &[1][..], &[1, 0, 0][..], &[2, 0][..], &[1, 1][..]] {
                 let frame = CanFrame::new(StandardId::new(id).unwrap(), data).unwrap();
                 assert!(

@@ -41,6 +41,8 @@ fn project_bridge_can(signal: ObservedEcuSignal) -> TwinIngressEvent {
         ObservedEcuSignal::HazardButton(_) => assert_eq!(frame.raw_id(), 0x105),
         ObservedEcuSignal::LeftTurnRequest(_) => assert_eq!(frame.raw_id(), 0x106),
         ObservedEcuSignal::RightTurnRequest(_) => assert_eq!(frame.raw_id(), 0x107),
+        ObservedEcuSignal::LeftLowBeamStatus(_) => assert_eq!(frame.raw_id(), 0x108),
+        ObservedEcuSignal::RightLowBeamStatus(_) => assert_eq!(frame.raw_id(), 0x109),
     }
     can_frame_to_twin_ingress(&frame).unwrap_or_else(|| {
         panic!("Gateway must project {signal:?} on {frame:?}");
