@@ -1,117 +1,125 @@
-# Phase IV — FLCM liveness fault + Twin Warning / low-beam observation
+# Phase IV — FLCM lamp status feedback + Twin Warning (cute car stays blind)
 
 **Date:** 2026-09-16  
 **Branch baseline (Twin):** `remotive-integration` (Phase III side-by-side + hazard-mode latch)  
 **Branch policy (Remotive):** all Hello World / topology edits on a **new dedicated branch** in the local Remotive tree so a RemotiveLabs PR (if offered) is a clean tip; Twin repo changes stay on the Twin integration branch  
-**Status:** Design approved in brainstorming; awaiting implementation plan
+**Status:** Design approved in brainstorming (Approach A); awaiting implementation plan  
+**Revision:** Corrected after DBC scan — FLCM had no TX today; Phase IV **adds** FLCM status/liveness TX and Twin observation. Cute car remains on BCM *requests*.
 
 ## Goal
 
-Demonstrate that the Twin can detect when Remotive’s **Front Light Control Module (FLCM)** stops sending continuous BodyCan updates, raise a **TUI Warning**, and still present **low-beam L/R** state when frames are flowing (and last-known values while silent, if held).
+Show Twin integration value: **BCM still commands front low beams** and the **3D cute car still looks ON**, while **FLCM** reports lamp **Status** (OK / Fail) and cyclic **liveness**. When FLCM fails or goes silent, **only the Twin TUI warns** — Remotive “brain” (BCM) and cute car stay unaware.
 
-Remotive remains the source of lamp traffic and of the **fault inject**. The Twin does **not** actuate Remotive; it **observes** FLCM liveness and low-beam signals.
+Remotive owns fault inject on a PR-friendly branch. Twin **observes** only (no Twin→Remotive actuation).
 
 ## Problem
 
-Phase II/III Twin observation covers SCCM hazard + BCM turn requests only. Hello World’s FLCM is a broker restbus ECU (`FLCM: {}`) that cyclically participates on BodyCan. If that cyclic traffic stops, the **3D cute car** typically **holds last lamp values** (no fault chrome). Without a Twin liveness path, the attended console also has no Warning — so an ECU “went quiet” fault is invisible on the Twin side.
+### What Hello World does today
+
+- BodyCan light frames (`LowBeamLightControl`, DRL, turn, …) are **sent by BCM**, received by FLCM / RLCM / DIM (`platform/databases/body_can.dbc`).
+- `FLCM: {}` is a broker-attached ECU with **no behavioral model** and **no FLCM-authored TX frames**.
+- Cute car maps **BCM request** signals (e.g. `LowBeamLightControl.*Request`) — not lamp ECU feedback.
+- No Hello World brain (BCM / GWM / …) times out another ECU’s “I-am-working” signal. Closest pedagogy is RLCM↔RL LIN `counter` / `counter_times_2`, and **RLCM never checks** the slave reply — same open-loop class of gap.
+
+### Why that matters
+
+Command path can look healthy on the webpage while a front lamp ECU is dead or lying. Twin observation of **FLCM truth** is the value-add Phase IV must create (it does not exist yet).
 
 ## Architecture
 
 ```text
-Jupyter / fault hook (Remotive local branch)
-  → pause FLCM cyclic BodyCan TX (Approach A)
-  → FLCM-BodyCan0 traffic stops (or resumes)
+Jupyter light stalk → SCCM → BCM
+  → BodyCan LowBeamLightControl *Request*
+       ├→ 3D cute car (UNCHANGED mapping) → beams look ON
+       └→ FLCM (new stub on Remotive branch)
+            → BodyCan LowBeamLightStatus L/R (+ cyclic alive)
+                 ├→ BCM / GWM: do NOT consume in Phase IV (blind)
+                 └→ remotive_bridge → Gateway → Twin → TUI Warning
 
-remotive_bridge
-  → subscribe: Phase II three signals (unchanged)
-  → PLUS FLCM liveness feed + LowBeam L/R (exact IDs locked in plan spike)
-  → Gateway → Twin
-
-Twin
-  → liveness timer on last FLCM traffic → diagnostic / Warning when stalled
-  → low-beam L/R into observed context for TUI
-  → TUI: Warning on silence; attended low-beam when known
+Fault inject (Jupyter / hook):
+  FLCM Status=Fail and/or mute FLCM cyclic TX
+  BCM requests keep flowing → cute car still ON
 ```
 
 ### Ownership
 
 | Component | Owns |
 |-----------|------|
-| Remotive Hello World (**new local branch**) | Fault-injectable pause/resume of FLCM cyclic TX; minimal Python |
-| `remotive_bridge` | Expanded subscribe: FLCM liveness + `LowBeamLightControl` L/R; still no Twin→Remotive publisher |
-| Gateway / Twin | Silence detection → Warning; beam values in published context |
-| Twin TUI | Warning surface; attended low-beam L/R |
-| Phase IV docs (Twin repo) | Spec, plan, and updated Remotive **run steps** for fault inject + Twin attach |
+| Remotive Hello World (**new local branch**) | DBC: FLCM-authored status/liveness frames; tiny FLCM stub/restbus; controllable fault inject (minimal Python); leave cute-car mapping and BCM beams policy alone |
+| `remotive_bridge` | Keep Phase II three signals; **add** FLCM Status L/R + liveness subscribe (exact IDs in plan spike) |
+| Gateway / Twin | Map FLCM Status + silence → Warning / context for TUI |
+| Twin TUI | Warning on Fail or silence; attended low-beam status (OK / Fail / Unknown) |
+| Phase IV docs (Twin repo) | Spec, plan, Remotive branch name, inject + Twin run steps |
 
 ### Branching / PR posture
 
-- **Remotive topology / Hello World:** create and keep work on a **new branch** (name chosen at plan start, e.g. `demo/flcm-liveness-fault`). Do not mix unrelated Remotive edits on that branch. If RemotiveLabs agrees, open a PR from that branch; otherwise the branch remains local / private fork.
-- **Twin (`sdv_simulation_remotive`):** implement Phase IV on the Twin integration branch; document the Remotive branch name and run commands in the Phase IV plan / run steps.
-- License / private GitHub copy: operator’s choice; this design does not require publishing Remotive changes.
+- **Remotive:** dedicated branch (e.g. `demo/flcm-lamp-status-feedback`). Clean tip for optional RemotiveLabs PR (“add front lamp status ECU + demo fault inject”).
+- **Twin:** Phase IV on Twin integration branch; docs name the Remotive branch and commands.
+- Private fork / license: operator’s choice; publishing Remotive changes is optional.
 
-## Approach (locked)
+## Approach (locked) — A
 
-**Approach A — fault-injectable FLCM silence**, with lock-in **C** (heartbeat for Warning **and** beam values for TUI lamp state).
+**FLCM Status + silence; BCM and cute car ignore FLCM feedback.**
 
-Remotive implementation preference (minimal Python):
+### Remotive (minimal Python)
 
-1. **First spike:** pause/stop FLCM cyclic TX via existing Jupyter / `BrokerClient` / restbus APIs against `FLCM-BodyCan0` (notebook cell + docs only). Preferred because FLCM today has **no** behavioral Python model.
-2. **Fallback only if spike fails:** smallest local FLCM behavioral/restbus stub that can pause on a flag or Jupyter-driven signal — not a full lamp policy rewrite; not a BCM beams rewrite.
+1. **`body_can.dbc`:** add cyclic frame(s) with **sender = FLCM** (e.g. left/right low-beam **Status**, optional rolling counter). Receivers may list BCM/DIM for realism; **BCM Python must not consume them in Phase IV**.
+2. **FLCM stub:** replace empty `FLCM: {}` with the smallest restbus/behavioral stub that:
+   - normally publishes Status=OK (or mirrors “commanded on” as healthy) on a cycle;
+   - on fault inject: Status=Fail and/or stops cyclic TX;
+   - on resume: restores OK + TX.
+3. **Inject surface:** Jupyter cell or one-shot hook (prefer notebook-only control once stub exists).
+4. **Do not** rewrite BCM `BeamsStateMachine` or change `3d_car_mapping.yaml` for Phase IV.
 
-Twin implementation:
+### Twin
 
-- Treat **recent FLCM namespace/cyclic traffic** as alive (heartbeat).
-- After silence longer than threshold `T` (concrete default in plan), emit/raise a **Warning** on TUI; clear when traffic resumes.
-- Observe **low-beam L/R** for attended TUI state (last known may remain displayed during silence).
-- Do **not** reuse Twin→actuator `FrontHeadlampActuationIncomplete` / ACK timeout for this story; that path is actuation ACK, not Remotive observation silence.
+- Subscribe to FLCM Status L/R + treat recent FLCM status/liveness TX as alive.
+- **Warning** when Status=Fail **or** silence longer than threshold `T` (default in plan).
+- Clear Warning when Status=OK and traffic resumes.
+- Attended TUI low-beam status from FLCM (not from BCM request lines alone).
+- Do **not** use Twin→actuator `FrontHeadlampActuationIncomplete` ACK path for this story.
 
-Cute car:
+### Cute car (intentional blindness)
 
-- Leave `3d_car_mapping.yaml` unchanged unless a spike proves a mapping bug.
-- Expected during silence: **last-value hold** on low beam / related indicators — intentional contrast with Twin Warning.
-
-Rejected for Phase IV:
-
-- Container kill as the primary demo (too blunt; optional emergency only)
-- Random unsupervised stalls without a controllable inject
-- Inferring FLCM health only from BCM request lines without FLCM-side silence
-- Twin→Remotive actuation
+- Keep mapping to BCM `LowBeamLightControl.*Request`.
+- During FLCM Fail/silence with BCM still commanding ON: **webpage beams stay ON** — contrast with Twin Warning is the demo.
 
 ## Twin / bridge contracts (intent)
 
-- Phase II three-signal hazard/turn path **keeps working**.
-- Bridge readiness / subscription list **grows** by the FLCM liveness + low-beam identities chosen in the plan spike; document the exact strings in the plan and run steps.
-- Schema / published context: add only what TUI needs for Warning + low-beam (version bump if required by existing observation rules).
-- Warning is an attended operator signal (Notice/diagnostic path as used by TUI today), not cute-car chrome.
+- Phase III hazard + latch path still works.
+- Bridge subscription list grows by FLCM identities only (document exact strings in plan/run steps).
+- Schema / published context: only what TUI needs for Warning + FLCM low-beam status (version bump if observation rules require).
+- Warning uses existing attended Notice/diagnostic path — not cute-car chrome.
 
 ## Run shape (docs must update)
 
-Phase IV plan must list ordered shells, including Remotive on the **dedicated branch**:
-
-1. Check out Remotive demo branch; build/start Hello World (Jupyter + 3D car profiles as in Phase III).
+1. Check out Remotive **demo branch**; build/start Hello World (Jupyter + 3D car).
 2. Twin: `vcan0`, Gateway (UDS), TUI, bridge (expanded subscribe; `--rpm-clamp` as needed).
-3. Confirm Phase III hazard path still works.
-4. Inject FLCM silence (Jupyter cell or documented hook); confirm TUI Warning within `T`.
-5. Confirm low-beam attended when live; cute car may look frozen during silence.
-6. Resume FLCM; Warning clears.
-7. Controlled shutdown (Twin → compose → RemotiveBus as already documented).
+3. Set low beams ON via Jupyter; confirm cute car ON + TUI Status OK.
+4. Inject FLCM Fail and/or silence; confirm **TUI Warning** within `T` while **cute car still ON**.
+5. Resume FLCM; Warning clears; Status OK.
+6. Confirm Phase III hazard path still works.
+7. Controlled shutdown (Twin → compose → RemotiveBus).
 
 ## Explicitly deferred
 
-- **Asymmetric hazard:** hazard mode ON while only one side blinks (L/R disagree). Cute car looks one-sided wrong; Twin would show whole-car inconsistency. Not Phase IV.
-- Twin→Remotive actuation.
-- Environment / visibility from an ECU (e.g. tunnel) instead of bridge generation.
-- Blinking cosmetic `Hazard:` paint (separate from latch).
+- Teaching **BCM** to react to FLCM Fail (would close the Remotive loop and weaken Twin-only contrast).
+- Remapping cute car to FLCM Status (same).
+- **RLCM↔RL** slave-reply validation (rear LIN; good future PR, not this webpage demo).
+- **SCCM brake E2E** timeout (automotive-authentic, wrong domain for front lamps).
+- **Asymmetric hazard** (mode ON, one side dead).
+- Twin→Remotive actuation; environment-from-ECU; blinking Hazard paint.
 
 ## Acceptance
 
-1. Remotive edits live only on the dedicated Remotive branch (clean tip for a possible RemotiveLabs PR).
-2. Controllable FLCM silence inject; Twin TUI shows **Warning** within threshold `T`; Warning clears on resume.
-3. Low-beam L/R attended on TUI when FLCM/beam traffic is live.
-4. Phase III hazard + latch path still works with the expanded bridge subscribe.
-5. Phase IV plan/run steps document exact Remotive branch, inject command/cell, and Twin attach order.
-6. No Twin `SetTurnLights` (or equivalent) into Remotive for this phase.
+1. Remotive edits only on the dedicated Remotive branch.
+2. With low beams commanded ON: cute car shows ON; TUI shows FLCM Status OK when healthy.
+3. Fault inject → TUI **Warning** (Fail and/or silence within `T`) while cute car **remains ON**.
+4. Resume → Warning clears.
+5. Phase III hazard + latch still works with expanded bridge subscribe.
+6. Plan/run steps document Remotive branch, inject cell/command, Twin attach order.
+7. No Twin actuation into Remotive for this phase.
 
 ## Relationship to Phase III
 
-Phase III proved side-by-side observation (three signals + cute car). Phase IV **widens** observation and adds **ECU liveness** as a major Twin integration value demo, with intentional local Remotive fault inject on a PR-friendly branch.
+Phase III proved side-by-side observation of hazard/turns. Phase IV adds the **missing closed-loop signal from FLCM**, leaves Remotive visuals on the open-loop BCM request path, and makes the **Twin** the observer that traps lamp-ECU malfunction — the integration value Hello World does not provide alone.
