@@ -2,23 +2,26 @@
 //! Twin children, deterministic ledger, and TUI-facing published DTOs.
 //!
 //! Scope:
-//! - Encodes the same internal carriers the Remotive bridge writes (`0x105`/`0x106`/`0x107`).
+//! - Encodes the same internal carriers the Remotive bridge writes
+//!   (`0x105`/`0x106`/`0x107` and FLCM status `0x108`/`0x109`).
 //! - Projects those frames through the public Gateway mapping into `TwinIngressEvent`.
 //! - Drives the public Twin ingress seam (`submit_twin_ingress`).
 //! - Proves SCCM/BCM observation, ingress-ordered ledger, duplicate suppression,
 //!   empty actions (no Twin `SetTurnLights`), and controlled PowerOff.
+//! - Proves FLCM Ok/Fail status into ledger/context, Warning diagnostics, and
+//!   autonomous 500 ms silence.
 //!
 //! Non-scope:
-//! - Live Remotive broker / pytest (Task 7).
+//! - Live Remotive broker / pytest (Phase IV Task 8).
 //! - SocketCAN `vcan0` transport and standalone actuator processes.
 
 use std::time::Duration;
 
 use common::facade::{
-    AssemblyTopology, BcmState, LifecycleCommand, ObservedEcuSignal, PublishedBcmState,
-    PublishedDomainAction, PublishedFsmEvent, PublishedFsmState, PublishedObservedBool,
-    PublishedTransitionRecord, TwinIngressEvent, VehicleController,
-    VehicleControllerRuntimeOptions,
+    AssemblyTopology, BcmState, DiagnosticKind, DiagnosticLevel, DiagnosticRecord,
+    LifecycleCommand, ObservedEcuSignal, PublishedBcmState, PublishedDomainAction,
+    PublishedFsmEvent, PublishedFsmState, PublishedObservedBool, PublishedTransitionRecord,
+    TwinIngressEvent, VehicleController, VehicleControllerRuntimeOptions,
 };
 use common::fsm::FsmState;
 use common::vehicle_state::ObservedBool;
@@ -110,6 +113,70 @@ fn tui_observed_label(value: PublishedObservedBool) -> &'static str {
         PublishedObservedBool::Off => "OFF",
         PublishedObservedBool::On => "ON",
     }
+}
+
+fn assert_flcm_ctx(
+    row: &PublishedTransitionRecord,
+    left: PublishedObservedBool,
+    right: PublishedObservedBool,
+    silent: bool,
+) {
+    assert_eq!(row.current_ctx.flcm.left_low_beam_status_ok, left);
+    assert_eq!(row.current_ctx.flcm.right_low_beam_status_ok, right);
+    assert_eq!(row.current_ctx.flcm.silent, silent);
+}
+
+async fn recv_diagnostic(rx: &mut mpsc::UnboundedReceiver<DiagnosticRecord>) -> DiagnosticRecord {
+    tokio::time::timeout(Duration::from_millis(500), rx.recv())
+        .await
+        .expect("diagnostic timeout")
+        .expect("diagnostic channel closed")
+}
+
+fn assert_flcm_fault(
+    record: &DiagnosticRecord,
+    level: DiagnosticLevel,
+    silent: bool,
+    left_fail: bool,
+    right_fail: bool,
+) {
+    assert_eq!(record.level, level);
+    assert_eq!(
+        record.kind,
+        DiagnosticKind::FlcmLampFault {
+            silent,
+            left_fail,
+            right_fail,
+        }
+    );
+}
+
+async fn power_on_and_drain_startup(
+    controller: &VehicleController,
+    transition_rx: &mut mpsc::Receiver<PublishedTransitionRecord>,
+) {
+    let power_on = LifecycleCommand::PowerOn
+        .to_can_frame()
+        .expect("encode PowerOn");
+    submit_ingress(
+        controller,
+        can_frame_to_twin_ingress(&power_on).expect("Gateway maps PowerOn"),
+    )
+    .await;
+    wait_fsm_state(controller, FsmState::Idle, Duration::from_millis(500)).await;
+
+    let power_on_row = recv_row(transition_rx).await;
+    assert_eq!(power_on_row.event, PublishedFsmEvent::PowerOn);
+    let _sccm_ready = recv_row(transition_rx).await;
+    let bcm_ready = recv_row(transition_rx).await;
+    assert_eq!(bcm_ready.next_state, PublishedFsmState::Idle);
+    assert_eq!(bcm_ready.current_ctx.bcm.state, PublishedBcmState::Ready);
+    assert_flcm_ctx(
+        &bcm_ready,
+        PublishedObservedBool::Unknown,
+        PublishedObservedBool::Unknown,
+        false,
+    );
 }
 
 fn assert_tui_dtos(
@@ -471,5 +538,241 @@ async fn observed_hazard_left_and_right_cross_gateway_twin_ledger_and_tui_dtos()
     assert!(
         actuation_rx.try_recv().is_err(),
         "PowerOff must not invent Twin SetTurnLights actuation"
+    );
+}
+
+#[tokio::test]
+async fn observed_flcm_ok_and_fail_cross_gateway_twin_ledger_and_warning() {
+    let (transition_tx, mut transition_rx) = mpsc::channel(32);
+    let (diagnostic_tx, mut diagnostic_rx) = mpsc::unbounded_channel();
+    let (actuation_tx, mut actuation_rx) = mpsc::channel(16);
+    let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::PhaseI,
+        transition_tx: Some(transition_tx),
+        diagnostic_tx: Some(diagnostic_tx),
+        actuation_command_tx: Some(actuation_tx),
+        ..Default::default()
+    };
+    let (controller, _join) = VehicleController::install_and_start_with_options(
+        "E2E-PHASE-IV-FLCM-STATUS-01".into(),
+        runtime_options,
+    )
+    .await
+    .expect("controller start");
+
+    let boot = recv_diagnostic(&mut diagnostic_rx).await;
+    assert_eq!(boot.kind, DiagnosticKind::Boot);
+
+    power_on_and_drain_startup(&controller, &mut transition_rx).await;
+
+    let ready = controller
+        .get_snapshot(Some(Duration::from_millis(300)))
+        .await
+        .expect("ready snapshot");
+    assert_eq!(
+        ready.context().flcm.left_low_beam_status,
+        ObservedBool::Unknown
+    );
+    assert_eq!(
+        ready.context().flcm.right_low_beam_status,
+        ObservedBool::Unknown
+    );
+    assert!(!ready.context().flcm.silent);
+
+    submit_observed(&controller, ObservedEcuSignal::LeftLowBeamStatus(true)).await;
+    let left_ok = recv_row(&mut transition_rx).await;
+    // Published schema still maps FLCM observations to TimerTick (v7 context carries the facts).
+    assert_eq!(left_ok.event, PublishedFsmEvent::TimerTick);
+    assert_flcm_ctx(
+        &left_ok,
+        PublishedObservedBool::On,
+        PublishedObservedBool::Unknown,
+        false,
+    );
+    assert_observation_actions_empty(&left_ok);
+
+    submit_observed(&controller, ObservedEcuSignal::LeftLowBeamStatus(true)).await;
+    assert_no_extra_rows(&mut transition_rx).await;
+
+    submit_observed(&controller, ObservedEcuSignal::RightLowBeamStatus(true)).await;
+    let right_ok = recv_row(&mut transition_rx).await;
+    assert_eq!(right_ok.event, PublishedFsmEvent::TimerTick);
+    assert_flcm_ctx(
+        &right_ok,
+        PublishedObservedBool::On,
+        PublishedObservedBool::On,
+        false,
+    );
+    assert_observation_actions_empty(&right_ok);
+
+    let healthy = controller
+        .get_snapshot(Some(Duration::from_millis(300)))
+        .await
+        .expect("healthy FLCM snapshot");
+    assert_eq!(
+        healthy.context().flcm.left_low_beam_status,
+        ObservedBool::On
+    );
+    assert_eq!(
+        healthy.context().flcm.right_low_beam_status,
+        ObservedBool::On
+    );
+    assert!(!healthy.context().flcm.silent);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(40), diagnostic_rx.recv())
+            .await
+            .is_err(),
+        "Ok/Ok must not emit FlcmLampFault"
+    );
+
+    submit_observed(&controller, ObservedEcuSignal::LeftLowBeamStatus(false)).await;
+    let left_fail = recv_row(&mut transition_rx).await;
+    assert_eq!(left_fail.event, PublishedFsmEvent::TimerTick);
+    assert_flcm_ctx(
+        &left_fail,
+        PublishedObservedBool::Off,
+        PublishedObservedBool::On,
+        false,
+    );
+    assert_observation_actions_empty(&left_fail);
+
+    let fail_snapshot = controller
+        .get_snapshot(Some(Duration::from_millis(300)))
+        .await
+        .expect("left Fail snapshot");
+    assert_eq!(
+        fail_snapshot.context().flcm.left_low_beam_status,
+        ObservedBool::Off
+    );
+    assert_eq!(
+        fail_snapshot.context().flcm.right_low_beam_status,
+        ObservedBool::On
+    );
+    assert!(!fail_snapshot.context().flcm.silent);
+
+    let warning = recv_diagnostic(&mut diagnostic_rx).await;
+    assert_flcm_fault(&warning, DiagnosticLevel::Warning, false, true, false);
+
+    submit_observed(&controller, ObservedEcuSignal::RightLowBeamStatus(false)).await;
+    let right_fail = recv_row(&mut transition_rx).await;
+    assert_flcm_ctx(
+        &right_fail,
+        PublishedObservedBool::Off,
+        PublishedObservedBool::Off,
+        false,
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(40), diagnostic_rx.recv())
+            .await
+            .is_err(),
+        "latched Warning must not re-emit on the second Fail"
+    );
+
+    submit_observed(&controller, ObservedEcuSignal::LeftLowBeamStatus(true)).await;
+    let left_resume = recv_row(&mut transition_rx).await;
+    assert_flcm_ctx(
+        &left_resume,
+        PublishedObservedBool::On,
+        PublishedObservedBool::Off,
+        false,
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(40), diagnostic_rx.recv())
+            .await
+            .is_err(),
+        "one remaining Fail is not confirmed-healthy; must not clear Warning"
+    );
+
+    submit_observed(&controller, ObservedEcuSignal::RightLowBeamStatus(true)).await;
+    let both_ok = recv_row(&mut transition_rx).await;
+    assert_flcm_ctx(
+        &both_ok,
+        PublishedObservedBool::On,
+        PublishedObservedBool::On,
+        false,
+    );
+    let cleared = recv_diagnostic(&mut diagnostic_rx).await;
+    assert_flcm_fault(&cleared, DiagnosticLevel::Info, false, false, false);
+
+    assert!(
+        observation_rows_are_contiguous(&[
+            &left_ok,
+            &right_ok,
+            &left_fail,
+            &right_fail,
+            &left_resume,
+            &both_ok
+        ]),
+        "FLCM ledger order must follow ingress order with no duplicate holes"
+    );
+    assert!(
+        actuation_rx.try_recv().is_err(),
+        "FLCM status must not enqueue Twin actuation"
+    );
+}
+
+fn observation_rows_are_contiguous(rows: &[&PublishedTransitionRecord]) -> bool {
+    rows.windows(2)
+        .all(|pair| pair[1].record_seq == pair[0].record_seq + 1)
+}
+
+#[tokio::test]
+async fn observed_flcm_silence_sets_silent_flag_and_warning() {
+    let (transition_tx, mut transition_rx) = mpsc::channel(32);
+    let (diagnostic_tx, mut diagnostic_rx) = mpsc::unbounded_channel();
+    let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::PhaseI,
+        transition_tx: Some(transition_tx),
+        diagnostic_tx: Some(diagnostic_tx),
+        ..Default::default()
+    };
+    let (controller, _join) = VehicleController::install_and_start_with_options(
+        "E2E-PHASE-IV-FLCM-SILENCE-01".into(),
+        runtime_options,
+    )
+    .await
+    .expect("controller start");
+
+    let boot = recv_diagnostic(&mut diagnostic_rx).await;
+    assert_eq!(boot.kind, DiagnosticKind::Boot);
+
+    power_on_and_drain_startup(&controller, &mut transition_rx).await;
+
+    submit_observed(&controller, ObservedEcuSignal::LeftLowBeamStatus(true)).await;
+    let _left_ok = recv_row(&mut transition_rx).await;
+    submit_observed(&controller, ObservedEcuSignal::RightLowBeamStatus(true)).await;
+    let _right_ok = recv_row(&mut transition_rx).await;
+
+    let silent_row = tokio::time::timeout(Duration::from_millis(750), transition_rx.recv())
+        .await
+        .expect("autonomous silence ledger timeout")
+        .expect("transition channel closed");
+    assert_eq!(silent_row.event, PublishedFsmEvent::TimerTick);
+    assert_flcm_ctx(
+        &silent_row,
+        PublishedObservedBool::On,
+        PublishedObservedBool::On,
+        true,
+    );
+    assert_observation_actions_empty(&silent_row);
+
+    let warning = tokio::time::timeout(Duration::from_millis(250), diagnostic_rx.recv())
+        .await
+        .expect("autonomous silence warning timeout")
+        .expect("diagnostic channel closed");
+    assert_flcm_fault(&warning, DiagnosticLevel::Warning, true, false, false);
+
+    let snapshot = controller
+        .get_snapshot(Some(Duration::from_millis(300)))
+        .await
+        .expect("silent snapshot");
+    assert!(snapshot.context().flcm.silent);
+    assert_eq!(
+        snapshot.context().flcm.left_low_beam_status,
+        ObservedBool::On
+    );
+    assert_eq!(
+        snapshot.context().flcm.right_low_beam_status,
+        ObservedBool::On
     );
 }
