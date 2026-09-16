@@ -1,5 +1,5 @@
 use super::{
-    MISSING, LineRole, PaneLine, Segment, SegmentContent, SegmentStyle,
+    MISSING, LineRole, PaneLine, Segment, SegmentContent, SegmentStyle, format_low_beam_status,
 };
 use common::DiagnosticRecord;
 use common::facade::{
@@ -41,6 +41,7 @@ pub fn driver_pane(
         };
     }
 
+    let flcm_silent = ledger.is_some_and(|row| row.current_ctx.flcm.silent);
     let lines = vec![
         PaneLine::spacer(width),
         PaneLine::spacer(width),
@@ -77,6 +78,7 @@ pub fn driver_pane(
             ledger
                 .map(|row| row.current_ctx.flcm.left_low_beam_status_ok)
                 .unwrap_or(PublishedObservedBool::Unknown),
+            flcm_silent,
             width,
         ),
         PaneLine::spacer(width),
@@ -85,6 +87,7 @@ pub fn driver_pane(
             ledger
                 .map(|row| row.current_ctx.flcm.right_low_beam_status_ok)
                 .unwrap_or(PublishedObservedBool::Unknown),
+            flcm_silent,
             width,
         ),
     ];
@@ -96,15 +99,6 @@ fn format_observed_bool(value: PublishedObservedBool) -> &'static str {
         PublishedObservedBool::Unknown => "UNKNOWN",
         PublishedObservedBool::Off => "OFF",
         PublishedObservedBool::On => "ON",
-    }
-}
-
-/// FLCM status wire: `On` = OK, `Off` = Fail, `Unknown` = not yet observed.
-fn format_low_beam_status(value: PublishedObservedBool) -> &'static str {
-    match value {
-        PublishedObservedBool::Unknown => "UNKNOWN",
-        PublishedObservedBool::Off => "FAIL",
-        PublishedObservedBool::On => "OK",
     }
 }
 
@@ -259,8 +253,13 @@ fn observed_pane_line(label: &str, value: PublishedObservedBool, width: usize) -
     labeled_visibility_line(label, format_observed_bool(value), width)
 }
 
-fn low_beam_pane_line(label: &str, value: PublishedObservedBool, width: usize) -> PaneLine {
-    labeled_visibility_line(label, format_low_beam_status(value), width)
+fn low_beam_pane_line(
+    label: &str,
+    value: PublishedObservedBool,
+    silent: bool,
+    width: usize,
+) -> PaneLine {
+    labeled_visibility_line(label, &format_low_beam_status(value, silent), width)
 }
 
 fn labeled_visibility_line(label: &str, value: &str, width: usize) -> PaneLine {
@@ -714,6 +713,39 @@ mod tests {
         assert!(!text.contains("Low beam L: ON"), "{text}");
         assert!(!text.contains("Low beam R: ON"), "{text}");
         assert!(!text.contains("Low beam L: OFF"), "{text}");
+    }
+
+    /// The silence demo must be readable on the pane itself, not only in the instant the
+    /// Warning Notice arrives: last-known `OK` next to a dead FLCM is the wrong story.
+    #[test]
+    fn driver_low_beam_rows_show_stale_while_flcm_is_silent() {
+        let mut ledger = sample_ledger(10, 100, PublishedHeadlampState::On);
+        ledger.current_ctx.flcm.left_low_beam_status_ok = PublishedObservedBool::On;
+        ledger.current_ctx.flcm.right_low_beam_status_ok = PublishedObservedBool::On;
+        ledger.current_ctx.flcm.silent = true;
+
+        let text = pane_text(&driver_pane(None, Some(&ledger), 64));
+        assert!(text.contains("Low beam L: OK (stale)"), "{text}");
+        assert!(text.contains("Low beam R: OK (stale)"), "{text}");
+
+        ledger.current_ctx.flcm.silent = false;
+        let alive = pane_text(&driver_pane(None, Some(&ledger), 64));
+        assert!(alive.contains("Low beam L: OK"), "{alive}");
+        assert!(!alive.contains("(stale)"), "{alive}");
+    }
+
+    #[test]
+    fn driver_stale_low_beam_rows_still_fit_narrow_widths() {
+        let mut ledger = sample_ledger(10, 100, PublishedHeadlampState::On);
+        ledger.current_ctx.flcm.left_low_beam_status_ok = PublishedObservedBool::Off;
+        ledger.current_ctx.flcm.right_low_beam_status_ok = PublishedObservedBool::Unknown;
+        ledger.current_ctx.flcm.silent = true;
+        for width in [24usize, 64, 96] {
+            for line in &driver_pane(None, Some(&ledger), width).lines {
+                assert_eq!(line.display_width(), width, "{:?}", line.text());
+                assert!(!line.text().contains('\n'));
+            }
+        }
     }
 
     #[test]

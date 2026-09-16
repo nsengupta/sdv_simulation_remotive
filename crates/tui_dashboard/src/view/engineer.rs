@@ -1,4 +1,4 @@
-use super::{LineRole, PaneLine};
+use super::{LineRole, PaneLine, format_low_beam_status};
 use common::facade::{
     PublishedBcmState, PublishedFsmEvent, PublishedFsmState, PublishedObservedBool,
     PublishedTransitionRecord,
@@ -57,7 +57,10 @@ pub fn engineer_pane(ledger: Option<&PublishedTransitionRecord>, width: usize) -
             LineRole::EngineerAssembly,
             &format!(
                 "  Low beam L: {}",
-                format_low_beam_status(row.current_ctx.flcm.left_low_beam_status_ok)
+                format_low_beam_status(
+                    row.current_ctx.flcm.left_low_beam_status_ok,
+                    row.current_ctx.flcm.silent
+                )
             ),
             width,
         ),
@@ -65,7 +68,22 @@ pub fn engineer_pane(ledger: Option<&PublishedTransitionRecord>, width: usize) -
             LineRole::EngineerAssembly,
             &format!(
                 "  Low beam R: {}",
-                format_low_beam_status(row.current_ctx.flcm.right_low_beam_status_ok)
+                format_low_beam_status(
+                    row.current_ctx.flcm.right_low_beam_status_ok,
+                    row.current_ctx.flcm.silent
+                )
+            ),
+            width,
+        ),
+        PaneLine::plain_fitted(
+            LineRole::EngineerAssembly,
+            &format!(
+                "  FLCM: {}",
+                if row.current_ctx.flcm.silent {
+                    "SILENT"
+                } else {
+                    "alive"
+                }
             ),
             width,
         ),
@@ -110,15 +128,6 @@ fn format_observed_bool(value: PublishedObservedBool) -> &'static str {
         PublishedObservedBool::Unknown => "UNKNOWN",
         PublishedObservedBool::Off => "OFF",
         PublishedObservedBool::On => "ON",
-    }
-}
-
-/// FLCM status wire: `On` = OK, `Off` = Fail, `Unknown` = not yet observed.
-fn format_low_beam_status(value: PublishedObservedBool) -> &'static str {
-    match value {
-        PublishedObservedBool::Unknown => "UNKNOWN",
-        PublishedObservedBool::Off => "FAIL",
-        PublishedObservedBool::On => "OK",
     }
 }
 
@@ -294,6 +303,33 @@ mod tests {
     }
 
     #[test]
+    fn engineer_marks_low_beam_rows_stale_while_flcm_is_silent() {
+        let mut ledger = sample_ledger();
+        ledger.current_ctx.flcm.left_low_beam_status_ok = PublishedObservedBool::On;
+        ledger.current_ctx.flcm.right_low_beam_status_ok = PublishedObservedBool::On;
+        ledger.current_ctx.flcm.silent = true;
+
+        let text = pane_text(&engineer_pane(Some(&ledger), 64));
+        assert!(text.contains("Low beam L: OK (stale)"), "{text}");
+        assert!(text.contains("Low beam R: OK (stale)"), "{text}");
+        assert!(text.contains("FLCM: SILENT"), "{text}");
+    }
+
+    #[test]
+    fn engineer_shows_flcm_alive_and_plain_status_when_not_silent() {
+        let mut ledger = sample_ledger();
+        ledger.current_ctx.flcm.left_low_beam_status_ok = PublishedObservedBool::On;
+        ledger.current_ctx.flcm.right_low_beam_status_ok = PublishedObservedBool::Off;
+
+        let text = pane_text(&engineer_pane(Some(&ledger), 64));
+        assert!(text.contains("Low beam L: OK"), "{text}");
+        assert!(text.contains("Low beam R: FAIL"), "{text}");
+        assert!(!text.contains("(stale)"), "{text}");
+        assert!(text.contains("FLCM: alive"), "{text}");
+        assert!(!text.contains("FLCM: SILENT"), "{text}");
+    }
+
+    #[test]
     fn engineer_formats_observed_events_explicitly() {
         let cases = [
             (
@@ -307,6 +343,14 @@ mod tests {
             (
                 PublishedFsmEvent::RightTurnRequestObserved(false),
                 "Last event: RightTurnRequestObserved(false)",
+            ),
+            (
+                PublishedFsmEvent::LeftLowBeamStatusObserved(true),
+                "Last event: LeftLowBeamStatusObserved(true)",
+            ),
+            (
+                PublishedFsmEvent::RightLowBeamStatusObserved(false),
+                "Last event: RightLowBeamStatusObserved(false)",
             ),
         ];
         for (event, needle) in cases {
