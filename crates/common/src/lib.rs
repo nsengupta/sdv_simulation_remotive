@@ -37,8 +37,8 @@ pub use front_headlamp_log::{
 };
 pub use observation_records::diagnostic::sink::{
     DiagnosticSink, DiagnosticSinkError, TokioMpscDiagnosticSink, diag_actuation_failure,
-    diag_boot, diag_headlamp_actuation_unconfirmed, diag_rain_changed, diag_timer_tick,
-    diag_transition_sink_closed, diag_transition_sink_full, diag_warning,
+    diag_boot, diag_flcm_lamp_fault, diag_headlamp_actuation_unconfirmed, diag_rain_changed,
+    diag_timer_tick, diag_transition_sink_closed, diag_transition_sink_full, diag_warning,
     diag_wiper_motion_changed, spawn_stdout_diagnostic_observer,
 };
 pub use observation_records::transition::sink::{

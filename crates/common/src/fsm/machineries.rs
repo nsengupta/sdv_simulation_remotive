@@ -49,6 +49,7 @@ pub enum FsmState {
 pub enum AssemblyId {
     Sccm,
     Bcm,
+    Flcm,
     Headlamp,
     /// assembly: windshield wiper.
     Wiper,
@@ -69,6 +70,8 @@ pub enum FsmEvent {
     HazardButtonObserved(bool),
     LeftTurnRequestObserved(bool),
     RightTurnRequestObserved(bool),
+    LeftLowBeamStatusObserved(bool),
+    RightLowBeamStatusObserved(bool),
     UpdateAmbientLux(u16),
     FrontHeadlampOnAck,
     FrontHeadlampOffAck,

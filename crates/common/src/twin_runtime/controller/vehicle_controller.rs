@@ -56,6 +56,9 @@ pub struct VehicleControllerRuntimeOptions {
     /// Contract tests: SCCM twinlet ignores tells (manual `ZoneReady` injection needed).
     #[doc(hidden)]
     pub test_silent_sccm: bool,
+    /// Contract tests: FLCM twinlet ignores tells.
+    #[doc(hidden)]
+    pub test_silent_flcm: bool,
 }
 
 impl Default for VehicleControllerRuntimeOptions {
@@ -70,6 +73,7 @@ impl Default for VehicleControllerRuntimeOptions {
             test_silent_wiper: false,
             test_silent_bcm: false,
             test_silent_sccm: false,
+            test_silent_flcm: false,
         }
     }
 }

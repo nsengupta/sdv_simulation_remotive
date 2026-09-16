@@ -3,6 +3,7 @@ pub mod connectors;
 pub mod constants;
 pub mod controller;
 pub mod detectors;
+pub mod flcm_actor;
 pub mod headlamp_actor;
 pub mod observation_streak;
 pub mod outcome_map;
@@ -15,6 +16,10 @@ pub mod zone_tell_back;
 pub mod zone_turn;
 
 pub use bcm_actor::{BcmActor, BcmActorMsg, BcmActorState, BcmActorVocabulary, tell_bcm_zone};
+pub use flcm_actor::{
+    FLCM_SILENCE_THRESHOLD, FlcmActor, FlcmActorMsg, FlcmActorState, FlcmActorVocabulary,
+    tell_flcm_zone,
+};
 pub use headlamp_actor::{
     HeadlampActor, HeadlampActorMsg, HeadlampActorVocabulary, tell_headlamp_zone,
 };

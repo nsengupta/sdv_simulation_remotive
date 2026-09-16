@@ -206,6 +206,7 @@ pub enum TwinMessage {
 pub enum ZoneReply {
     Sccm(crate::vehicle_state::SccmZoneReply),
     Bcm(crate::vehicle_state::BcmZoneReply),
+    Flcm(crate::vehicle_state::FlcmZoneReply),
     Headlamp(crate::vehicle_state::HeadlampZoneReply),
     /// wiper zone reply.
     Wiper(crate::vehicle_state::WiperZoneReply),
@@ -217,6 +218,7 @@ impl ZoneReply {
             (self, assembly_id),
             (Self::Sccm(_), crate::fsm::AssemblyId::Sccm)
                 | (Self::Bcm(_), crate::fsm::AssemblyId::Bcm)
+                | (Self::Flcm(_), crate::fsm::AssemblyId::Flcm)
                 | (Self::Headlamp(_), crate::fsm::AssemblyId::Headlamp)
                 | (Self::Wiper(_), crate::fsm::AssemblyId::Wiper)
         )
@@ -226,6 +228,7 @@ impl ZoneReply {
         match self {
             Self::Sccm(reply) => reply.disposition,
             Self::Bcm(reply) => reply.disposition,
+            Self::Flcm(reply) => reply.disposition,
             Self::Headlamp(_) | Self::Wiper(_) => {
                 crate::vehicle_state::ObservationDisposition::Lifecycle
             }
@@ -242,6 +245,14 @@ impl ZoneReply {
 
     pub fn as_bcm(&self) -> Option<&crate::vehicle_state::BcmZoneReply> {
         if let ZoneReply::Bcm(r) = self {
+            Some(r)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_flcm(&self) -> Option<&crate::vehicle_state::FlcmZoneReply> {
+        if let ZoneReply::Flcm(r) = self {
             Some(r)
         } else {
             None
@@ -277,6 +288,7 @@ impl ZoneReply {
 pub(crate) enum ZoneMessage {
     Sccm(crate::vehicle_state::SccmMessage),
     Bcm(crate::vehicle_state::BcmMessage),
+    Flcm(crate::vehicle_state::FlcmMessage),
     Headlamp(crate::vehicle_state::HeadlampMessage),
     Wiper(crate::vehicle_state::WiperMessage),
 }

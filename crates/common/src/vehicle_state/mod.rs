@@ -5,6 +5,7 @@
 //! first). Zones import L0 only — no L2/L4.
 
 pub mod bcm;
+pub mod flcm;
 pub mod front_headlamp;
 pub mod health;
 pub mod observed;
@@ -15,6 +16,7 @@ pub mod weather;
 pub mod wiper;
 
 pub use bcm::{BcmContext, BcmMessage, BcmOutcome, BcmState, BcmZoneReply};
+pub use flcm::{FlcmContext, FlcmMessage, FlcmZoneReply};
 pub use front_headlamp::{
     FrontHeadlampIncompleteCause, FrontHeadlampSwitchDirection, HeadlampContext, HeadlampMessage,
     HeadlampOutcome, HeadlampState, HeadlampZoneReply,
@@ -43,6 +45,7 @@ pub use wiper::{WiperContext, WiperMessage, WiperOutcome, WiperState, WiperZoneR
 pub struct VehicleContext {
     pub sccm: SccmContext,
     pub bcm: BcmContext,
+    pub flcm: FlcmContext,
     pub powertrain: PowertrainContext,
     pub health: VehicleHealthContext,
     pub visibility: VisibilityContext,

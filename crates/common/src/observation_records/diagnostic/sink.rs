@@ -3,6 +3,7 @@
 use super::{DiagnosticKind, DiagnosticLevel, DiagnosticRecord};
 use crate::fsm::FrontHeadlampIncompleteCause;
 use crate::observation_records::transition::SessionClock;
+use crate::vehicle_state::{FlcmContext, ObservedBool};
 use tokio::sync::mpsc;
 
 /// Abstract sink for diagnostic records emitted by the digital twin.
@@ -70,6 +71,19 @@ pub fn diag_rain_changed(clock: &SessionClock, raining: bool) -> DiagnosticRecor
 
 pub fn diag_wiper_motion_changed(clock: &SessionClock, wiping: bool) -> DiagnosticRecord {
     DiagnosticRecord::info(clock, SOURCE, DiagnosticKind::WiperMotionChanged { wiping })
+}
+
+pub fn diag_flcm_lamp_fault(clock: &SessionClock, flcm: &FlcmContext) -> DiagnosticRecord {
+    let kind = DiagnosticKind::FlcmLampFault {
+        silent: flcm.silent,
+        left_fail: flcm.left_low_beam_status == ObservedBool::Off,
+        right_fail: flcm.right_low_beam_status == ObservedBool::Off,
+    };
+    if flcm.has_fault() {
+        DiagnosticRecord::warning(clock, SOURCE, kind)
+    } else {
+        DiagnosticRecord::info(clock, SOURCE, kind)
+    }
 }
 
 pub fn diag_actuation_failure(clock: &SessionClock, action: &str, err: &str) -> DiagnosticRecord {

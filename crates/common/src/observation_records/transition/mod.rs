@@ -237,6 +237,10 @@ impl From<&FsmEvent> for PublishedFsmEvent {
             FsmEvent::Internal(op) => Self::Internal(op.into()),
             FsmEvent::RainsStarted => Self::RainsStarted,
             FsmEvent::RainsStopped => Self::RainsStopped,
+            // Task 4 adds these events to the published schema. Keep v1 unchanged for now.
+            FsmEvent::LeftLowBeamStatusObserved(_) | FsmEvent::RightLowBeamStatusObserved(_) => {
+                Self::TimerTick
+            }
             // AssemblyZoneReady remains unpublished; map to TimerTick as a neutral placeholder.
             FsmEvent::AssemblyZoneReady(_) => Self::TimerTick,
         }

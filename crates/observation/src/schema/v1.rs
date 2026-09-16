@@ -661,6 +661,16 @@ fn project_diagnostic_kind(kind: &DiagnosticKind) -> DiagnosticKindV1 {
         DiagnosticKind::WiperMotionChanged { wiping } => {
             DiagnosticKindV1::WiperMotionChanged { wiping: *wiping }
         }
+        // Task 4 gives FLCM facts their own wire variant. Preserve v1 compatibility meanwhile.
+        DiagnosticKind::FlcmLampFault {
+            silent,
+            left_fail,
+            right_fail,
+        } => DiagnosticKindV1::Text {
+            text: format!(
+                "flcm lamp fault silent={silent} left_fail={left_fail} right_fail={right_fail}"
+            ),
+        },
         DiagnosticKind::ActuationFailure { action, error } => DiagnosticKindV1::ActuationFailure {
             action: action.clone(),
             error: error.clone(),

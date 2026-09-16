@@ -112,7 +112,8 @@ fn format_notice_body(diagnostic: Option<&DiagnosticRecord>) -> String {
         }
         DiagnosticKind::HeadlampActuationUnconfirmed { .. }
         | DiagnosticKind::RainChanged { .. }
-        | DiagnosticKind::WiperMotionChanged { .. } => "(no notice yet)".to_owned(),
+        | DiagnosticKind::WiperMotionChanged { .. }
+        | DiagnosticKind::FlcmLampFault { .. } => "(no notice yet)".to_owned(),
         DiagnosticKind::ActuationFailure { action, error } => format!(
             "{} — Actuation failure ({action}: {error})",
             format_level(d.level)

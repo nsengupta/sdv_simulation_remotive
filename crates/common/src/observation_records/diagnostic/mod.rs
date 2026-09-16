@@ -70,6 +70,12 @@ pub enum DiagnosticKind {
         wiping: bool,
     },
 
+    FlcmLampFault {
+        silent: bool,
+        left_fail: bool,
+        right_fail: bool,
+    },
+
     ActuationFailure {
         action: String,
         error: String,
@@ -182,6 +188,13 @@ fn format_kind_ascii(kind: &DiagnosticKind) -> String {
         }
         DiagnosticKind::RainChanged { raining } => format!("rain raining={raining}"),
         DiagnosticKind::WiperMotionChanged { wiping } => format!("wiper wiping={wiping}"),
+        DiagnosticKind::FlcmLampFault {
+            silent,
+            left_fail,
+            right_fail,
+        } => {
+            format!("flcm lamp fault silent={silent} left_fail={left_fail} right_fail={right_fail}")
+        }
         DiagnosticKind::ActuationFailure { action, error } => {
             format!("actuation failure action={action} error={error}")
         }

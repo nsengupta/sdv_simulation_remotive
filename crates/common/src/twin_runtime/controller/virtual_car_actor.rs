@@ -35,7 +35,7 @@ use crate::fsm::{
 };
 use crate::observation_records::diagnostic::sink::{
     DiagnosticSink, TokioMpscDiagnosticSink, diag_actuation_failure, diag_boot,
-    diag_headlamp_actuation_unconfirmed, diag_rain_changed, diag_timer_tick,
+    diag_flcm_lamp_fault, diag_headlamp_actuation_unconfirmed, diag_rain_changed, diag_timer_tick,
     diag_transition_sink_closed, diag_warning, diag_wiper_motion_changed,
 };
 use crate::observation_records::transition::sink::{
@@ -50,6 +50,7 @@ use crate::twin_runtime::controller::actuation_manager::{
     ActuationManager, DefaultActuationManager,
 };
 use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
+use crate::twin_runtime::flcm_actor::{FlcmActor, FlcmActorMsg, FlcmActorState, tell_flcm_zone};
 use crate::twin_runtime::headlamp_actor::{
     HeadlampActor, HeadlampActorMsg, HeadlampActorState, tell_headlamp_zone,
 };
@@ -67,8 +68,8 @@ use crate::twin_runtime::zone_tell_back::{
 use crate::twin_runtime::zone_turn::zone_message_for_event;
 use crate::vehicle_state::WiperState;
 use crate::vehicle_state::{
-    BcmMessage, BcmZoneReply, HeadlampMessage, ObservationDisposition, SccmMessage, SccmZoneReply,
-    VehicleContext, WiperMessage,
+    BcmMessage, BcmZoneReply, FlcmMessage, FlcmZoneReply, HeadlampMessage, ObservationDisposition,
+    SccmMessage, SccmZoneReply, VehicleContext, WiperMessage,
 };
 
 /// The Digital Twin Actor
@@ -100,6 +101,7 @@ pub struct VirtualCarRuntimeState {
     twin_car: DigitalTwinCar,
     sccm_actor: ActorRef<SccmActorMsg>,
     bcm_actor: ActorRef<BcmActorMsg>,
+    flcm_actor: ActorRef<FlcmActorMsg>,
     headlamp_actor: Option<ActorRef<HeadlampActorMsg>>,
     wiper_actor: Option<ActorRef<WiperActorMsg>>,
     /// Stable self-reference used to arm timers and send `ZoneTellBackTimeout` messages.
@@ -117,6 +119,7 @@ pub struct VirtualCarRuntimeState {
     actuation_manager: Arc<dyn ActuationManager>,
     diagnostic_sink: Option<Arc<dyn DiagnosticSink>>,
     transition_sink: Option<Arc<dyn TransitionRecordSink>>,
+    flcm_warning_active: bool,
 }
 
 impl VirtualCarRuntimeState {
@@ -216,11 +219,17 @@ impl Actor for VirtualCarActor {
             args.runtime_options.test_silent_bcm,
         ))
         .await?;
+        let (flcm_actor, _) = ractor::spawn::<FlcmActor>(FlcmActorState::new(
+            Default::default(),
+            args.runtime_options.test_silent_flcm,
+        ))
+        .await?;
 
         Ok(VirtualCarRuntimeState {
             twin_car: DigitalTwinCar::new(identity, FsmState::Off, VehicleContext::default())?,
             sccm_actor,
             bcm_actor,
+            flcm_actor,
             headlamp_actor,
             wiper_actor,
             self_ref: myself.clone(),
@@ -232,6 +241,7 @@ impl Actor for VirtualCarActor {
             actuation_manager,
             diagnostic_sink,
             transition_sink,
+            flcm_warning_active: false,
         })
     }
 
@@ -273,6 +283,8 @@ impl Actor for VirtualCarActor {
                         | FsmEvent::HazardButtonObserved(_)
                         | FsmEvent::LeftTurnRequestObserved(_)
                         | FsmEvent::RightTurnRequestObserved(_)
+                        | FsmEvent::LeftLowBeamStatusObserved(_)
+                        | FsmEvent::RightLowBeamStatusObserved(_)
                 ) && matches!(
                     runtime_state.twin_car.current_state(),
                     FsmState::PreparingToStart(_) | FsmState::PreparingToStop(_)
@@ -332,6 +344,7 @@ impl Actor for VirtualCarActor {
         runtime_state.barrier_queue.clear();
         runtime_state.sccm_actor.stop(None);
         runtime_state.bcm_actor.stop(None);
+        runtime_state.flcm_actor.stop(None);
         if let Some(actor) = &runtime_state.headlamp_actor {
             actor.stop(None);
         }
@@ -349,6 +362,7 @@ impl VirtualCarActor {
         match assembly_id {
             AssemblyId::Sccm => ZoneMessage::Sccm(SccmMessage::BecomeOn),
             AssemblyId::Bcm => ZoneMessage::Bcm(BcmMessage::BecomeOn),
+            AssemblyId::Flcm => ZoneMessage::Flcm(FlcmMessage::BecomeOn),
             AssemblyId::Headlamp => ZoneMessage::Headlamp(HeadlampMessage::BecomeOn),
             AssemblyId::Wiper => ZoneMessage::Wiper(WiperMessage::BecomeOn),
         }
@@ -358,6 +372,7 @@ impl VirtualCarActor {
         match assembly_id {
             AssemblyId::Sccm => ZoneMessage::Sccm(SccmMessage::BecomeOff),
             AssemblyId::Bcm => ZoneMessage::Bcm(BcmMessage::BecomeOff),
+            AssemblyId::Flcm => ZoneMessage::Flcm(FlcmMessage::BecomeOff),
             AssemblyId::Headlamp => ZoneMessage::Headlamp(HeadlampMessage::BecomeOff),
             AssemblyId::Wiper => ZoneMessage::Wiper(WiperMessage::BecomeOff),
         }
@@ -379,6 +394,14 @@ impl VirtualCarActor {
             ZoneMessage::Bcm(m) => {
                 tell_bcm_zone(&runtime_state.bcm_actor, brain, turn_id, tell_attempt, *m)
             }
+            ZoneMessage::Flcm(m) => tell_flcm_zone(
+                &runtime_state.flcm_actor,
+                brain,
+                turn_id,
+                tell_attempt,
+                *m,
+                now,
+            ),
             ZoneMessage::Headlamp(m) => tell_headlamp_zone(
                 runtime_state.headlamp_actor.as_ref().ok_or_else(|| {
                     ActorProcessingErr::from(std::io::Error::other(
@@ -415,6 +438,10 @@ impl VirtualCarActor {
             AssemblyId::Bcm => ZoneReply::Bcm(BcmZoneReply {
                 ctx: ctx.bcm.clone(),
                 outcomes: vec![],
+                disposition: ObservationDisposition::Lifecycle,
+            }),
+            AssemblyId::Flcm => ZoneReply::Flcm(FlcmZoneReply {
+                ctx: ctx.flcm.clone(),
                 disposition: ObservationDisposition::Lifecycle,
             }),
             AssemblyId::Headlamp => {
@@ -682,6 +709,27 @@ impl VirtualCarActor {
         let wiper_before = runtime_state.twin_car.context().wiper.state;
         let final_step = quiescent.final_step();
         let wiper_after = final_step.modified_ctx.wiper.state;
+        let flcm_lifecycle = quiescent.hops.iter().find_map(|hop| match &hop.event {
+            FsmEvent::PowerOn => Some(FlcmMessage::BecomeOn),
+            FsmEvent::PowerOff => Some(FlcmMessage::BecomeOff),
+            _ => None,
+        });
+        let emit_flcm_diagnostic = if flcm_lifecycle.is_some() {
+            runtime_state.flcm_warning_active = false;
+            false
+        } else if !runtime_state.flcm_warning_active
+            && final_step.modified_ctx.flcm.has_fault()
+        {
+            runtime_state.flcm_warning_active = true;
+            true
+        } else if runtime_state.flcm_warning_active
+            && final_step.modified_ctx.flcm.is_confirmed_healthy()
+        {
+            runtime_state.flcm_warning_active = false;
+            true
+        } else {
+            false
+        };
 
         let headlamp_unconfirmed: Option<(bool, FrontHeadlampIncompleteCause)> =
             quiescent.hops.iter().find_map(|hop| match &hop.event {
@@ -707,6 +755,17 @@ impl VirtualCarActor {
             final_step.next_state.clone(),
             final_step.modified_ctx.clone(),
         );
+
+        if let Some(message) = flcm_lifecycle {
+            tell_flcm_zone(
+                &runtime_state.flcm_actor,
+                &runtime_state.self_ref,
+                0,
+                0,
+                message,
+                Instant::now(),
+            )?;
+        }
 
         if let Some(sink) = &runtime_state.diagnostic_sink {
             for hop in &quiescent.hops {
@@ -737,6 +796,13 @@ impl VirtualCarActor {
                     &runtime_state.session_clock,
                     on,
                     cause,
+                ));
+            }
+
+            if emit_flcm_diagnostic {
+                let _ = sink.try_emit(diag_flcm_lamp_fault(
+                    &runtime_state.session_clock,
+                    &final_step.modified_ctx.flcm,
                 ));
             }
         }

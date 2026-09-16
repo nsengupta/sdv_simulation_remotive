@@ -24,12 +24,11 @@ impl Projector<TwinIngressEvent, TwinMessage> for IngressToFsmProjector {
             TwinIngressEvent::ObservedEcu(ObservedEcuSignal::RightTurnRequest(pressed)) => {
                 FsmEvent::RightTurnRequestObserved(pressed)
             }
-            TwinIngressEvent::ObservedEcu(
-                ObservedEcuSignal::LeftLowBeamStatus(_) | ObservedEcuSignal::RightLowBeamStatus(_),
-            ) => {
-                return Err(ProjectionError::InvalidPayload(
-                    "low-beam status is not projected into the FSM yet",
-                ));
+            TwinIngressEvent::ObservedEcu(ObservedEcuSignal::LeftLowBeamStatus(ok)) => {
+                FsmEvent::LeftLowBeamStatusObserved(ok)
+            }
+            TwinIngressEvent::ObservedEcu(ObservedEcuSignal::RightLowBeamStatus(ok)) => {
+                FsmEvent::RightLowBeamStatusObserved(ok)
             }
             TwinIngressEvent::Telemetry(vss) => match vss {
                 VssSignal::Speed(_) => {

@@ -6,8 +6,9 @@ use crate::digital_twin::{ZoneMessage, ZoneReply};
 use crate::fsm::{AssemblyId, FsmEvent, FsmState};
 use crate::twin_runtime::zone_replies::ZoneReplies;
 use crate::vehicle_state::{
-    BcmMessage, BcmOutcome, BcmZoneReply, HeadlampMessage, HeadlampOutcome, HeadlampZoneReply,
-    SccmMessage, SccmZoneReply, VehicleContext, WiperMessage, WiperOutcome, WiperZoneReply,
+    BcmMessage, BcmOutcome, BcmZoneReply, FlcmMessage, FlcmZoneReply, HeadlampMessage,
+    HeadlampOutcome, HeadlampZoneReply, SccmMessage, SccmZoneReply, VehicleContext, WiperMessage,
+    WiperOutcome, WiperZoneReply,
 };
 
 /// Tagged zone egress for one `zone_turn` call — replaces the per-zone
@@ -68,6 +69,14 @@ fn user_event_to_zone_tell(event: &FsmEvent) -> Option<(AssemblyId, ZoneMessage)
             AssemblyId::Bcm,
             ZoneMessage::Bcm(BcmMessage::RightTurnRequestObserved(*on)),
         )),
+        FsmEvent::LeftLowBeamStatusObserved(ok) => Some((
+            AssemblyId::Flcm,
+            ZoneMessage::Flcm(FlcmMessage::LeftLowBeamStatusObserved(*ok)),
+        )),
+        FsmEvent::RightLowBeamStatusObserved(ok) => Some((
+            AssemblyId::Flcm,
+            ZoneMessage::Flcm(FlcmMessage::RightLowBeamStatusObserved(*ok)),
+        )),
         FsmEvent::HazardButtonChanged(on) => Some((
             AssemblyId::Bcm,
             ZoneMessage::Bcm(BcmMessage::HazardButtonChanged(*on)),
@@ -98,9 +107,9 @@ fn user_event_to_zone_tell(event: &FsmEvent) -> Option<(AssemblyId, ZoneMessage)
         FsmEvent::UpdateRpm(_)
         | FsmEvent::PowerOn
         | FsmEvent::PowerOff
-        | FsmEvent::TimerTick
         | FsmEvent::Internal(_)
         | FsmEvent::AssemblyZoneReady(_) => None,
+        FsmEvent::TimerTick => Some((AssemblyId::Flcm, ZoneMessage::Flcm(FlcmMessage::TimerTick))),
     }
 }
 
@@ -122,6 +131,16 @@ fn merge_bcm_for_message(
     tell_back
         .cloned()
         .unwrap_or_else(|| ctx.bcm.on_receiving_message(message))
+}
+
+fn merge_flcm_for_message(
+    ctx: &VehicleContext,
+    message: FlcmMessage,
+    tell_back: Option<&FlcmZoneReply>,
+) -> FlcmZoneReply {
+    tell_back
+        .cloned()
+        .unwrap_or_else(|| ctx.flcm.on_receiving_message(message))
 }
 
 fn merge_headlamp_for_message(
@@ -168,6 +187,9 @@ pub fn zone_turn(
     let sccm_ingress = zone_replies
         .get(&AssemblyId::Sccm)
         .and_then(ZoneReply::as_sccm);
+    let flcm_ingress = zone_replies
+        .get(&AssemblyId::Flcm)
+        .and_then(ZoneReply::as_flcm);
 
     match event {
         FsmEvent::HazardButtonObserved(on) => {
@@ -186,6 +208,22 @@ pub fn zone_turn(
                 merge_bcm_for_message(ctx, BcmMessage::RightTurnRequestObserved(*on), bcm_ingress);
             next.bcm = zone_reply.ctx;
             outcomes.extend(zone_reply.outcomes.into_iter().map(ZoneOutcome::Bcm));
+        }
+        FsmEvent::LeftLowBeamStatusObserved(ok) => {
+            let zone_reply = merge_flcm_for_message(
+                ctx,
+                FlcmMessage::LeftLowBeamStatusObserved(*ok),
+                flcm_ingress,
+            );
+            next.flcm = zone_reply.ctx;
+        }
+        FsmEvent::RightLowBeamStatusObserved(ok) => {
+            let zone_reply = merge_flcm_for_message(
+                ctx,
+                FlcmMessage::RightLowBeamStatusObserved(*ok),
+                flcm_ingress,
+            );
+            next.flcm = zone_reply.ctx;
         }
         FsmEvent::HazardButtonChanged(on) => {
             next.sccm.hazard_button_on = *on;
@@ -238,6 +276,8 @@ pub fn zone_turn(
             outcomes.extend(zone_reply.outcomes.into_iter().map(ZoneOutcome::Headlamp));
         }
         FsmEvent::TimerTick => {
+            let flcm_reply = merge_flcm_for_message(ctx, FlcmMessage::TimerTick, flcm_ingress);
+            next.flcm = flcm_reply.ctx;
             let zone_reply =
                 merge_headlamp_for_message(ctx, HeadlampMessage::TimerTick, now, headlamp_ingress);
             next.headlamp = zone_reply.ctx;
@@ -255,7 +295,19 @@ pub fn zone_turn(
             next.wiper = zone_reply.ctx;
             outcomes.extend(zone_reply.outcomes.into_iter().map(ZoneOutcome::Wiper));
         }
-        FsmEvent::PowerOn | FsmEvent::PowerOff | FsmEvent::Internal(_) => {}
+        FsmEvent::PowerOn => {
+            next.flcm = ctx
+                .flcm
+                .on_receiving_message(FlcmMessage::BecomeOn)
+                .ctx;
+        }
+        FsmEvent::PowerOff => {
+            next.flcm = ctx
+                .flcm
+                .on_receiving_message(FlcmMessage::BecomeOff)
+                .ctx;
+        }
+        FsmEvent::Internal(_) => {}
         FsmEvent::AssemblyZoneReady(assembly_id) => match assembly_id {
             AssemblyId::Sccm => {
                 if let Some(reply) = sccm_ingress {
@@ -266,6 +318,11 @@ pub fn zone_turn(
                 if let Some(reply) = bcm_ingress {
                     next.bcm = reply.ctx.clone();
                     outcomes.extend(reply.outcomes.iter().cloned().map(ZoneOutcome::Bcm));
+                }
+            }
+            AssemblyId::Flcm => {
+                if let Some(reply) = flcm_ingress {
+                    next.flcm = reply.ctx.clone();
                 }
             }
             AssemblyId::Headlamp => {
