@@ -34,7 +34,12 @@ API; Rust 2024 Twin (`common` / `observation` / `remotive_bridge` / `gateway` /
 - Do not reuse Twin→actuator `FrontHeadlampActuationIncomplete` for this story.
 - Silence threshold **T = 500 ms** (≈10× 50 ms cycle).
 - Observation schema bump to **7** when emitting FLCM fields (v1–v6 remain
-  readable; missing FLCM deserializes as Unknown / not-silent).
+  readable; missing FLCM deserializes as Unknown / not-silent). The post-review fix
+  pass added the two FLCM observation *events* to the ledger, which a v7 reader
+  cannot parse, so the shipped version is **8** (v1–v7 remain readable).
+- The silence watchdog is armed by the **first observed FLCM status**, never by
+  PowerOn: a topology with no FLCM TX stays Unknown / not-silent, so Phase I–III
+  demos and emulator-only runs raise no FLCM Warning.
 - Prefer RED→GREEN tests before production changes.
 - Make no significant Twin commit without explicit user approval.
 - Do not overwrite user-owned untracked junk (`assets/*`, `palette.png`, etc.).
@@ -87,7 +92,7 @@ Phase II carriers `0x105`/`0x106`/`0x107` unchanged.
 | Twin `crates/common/src/vehicle_state/flcm.rs` | `FlcmContext` + silence bookkeeping helpers |
 | Twin `crates/common/src/twin_runtime/` | FLCM apply path + silence Warning emit |
 | Twin `crates/common/src/observation_records/` | Published FLCM + `DiagnosticKind::FlcmLampFault` |
-| Twin `crates/observation/` | Schema v7 |
+| Twin `crates/observation/` | Schema v7, then v8 for the FLCM observation events |
 | Twin `crates/remotive_bridge/` | Subscribe + decode + session write |
 | Twin `crates/gateway/` | Ingress map `0x108`/`0x109` |
 | Twin `crates/tui_dashboard/` | Notice Warning + low-beam status lines |
@@ -112,7 +117,7 @@ Phase II carriers `0x105`/`0x106`/`0x107` unchanged.
 - Produces broker signals listed in **Locked identities**
 - Control: `flcm_fault` / `ok|fail|silent`
 
-- [ ] **Step 1: Create Remotive branch**
+- [x] **Step 1: Create Remotive branch**
 
 ```bash
 cd /home/nirmalya/Workspace-Rust/Eclipse-SDV/RemotiveLabs/remotivelabs-topology-examples
@@ -121,7 +126,7 @@ git checkout -b demo/flcm-lamp-status-feedback
 
 Expected: on new branch.
 
-- [ ] **Step 2: Extend `body_can.dbc`**
+- [x] **Step 2: Extend `body_can.dbc`**
 
 After existing `BO_` blocks (before `VAL_` section), add:
 
@@ -139,7 +144,7 @@ BA_ "GenSigStartValue" SG_ 111 RightLowBeamLightStatus 0;
 BA_ "GenMsgCycleTime" BO_ 111 50;
 ```
 
-- [ ] **Step 3: Minimal FLCM behavioral stub**
+- [x] **Step 3: Minimal FLCM behavioral stub**
 
 Create `models/flcm/python/flcm/__main__.py` modeled on BCM restbus + control
 handler (keep under ~120 lines). Required behavior:
@@ -161,7 +166,7 @@ broker docs; fallback: set an internal flag and skip `update_signals` while
 silent (restbus may still send start values — prefer explicit restbus stop if
 available).
 
-- [ ] **Step 4: Wire instance**
+- [x] **Step 4: Wire instance**
 
 `models/flcm.bm.instance.yaml` (mirror `bcm.bm.instance.yaml` with
 `MODEL_PATH=flcm/python`, `python -m flcm`).
@@ -174,14 +179,14 @@ In `instances/hello_world/main.instance.yaml`:
   either add FLCM to a small `flcm` include used by hello_world, or set
   `FLCM: { models: ... }` per Remotive instance schema used by sibling ECUs)
 
-- [ ] **Step 5: Smoke Remotive alone**
+- [ ] **Step 5: Smoke Remotive alone** — **BLOCKED** (`remotivebusd` inactive; see Task 8)
 
 Build/start Hello World on this branch (same compose profile as Phase III).
 In Jupyter or a tiny script: set low beams ON; confirm
 `FLCM-BodyCan0` / `LowBeamLightStatus` cycles with Ok; send `flcm_fault=fail`
 then `silent`; confirm frames change / stop; cute car low beams still ON.
 
-- [ ] **Step 6: Commit on Remotive branch only**
+- [x] **Step 6: Commit on Remotive branch only**
 
 ```bash
 git add platform/databases/body_can.dbc models/flcm models/flcm.bm.instance.yaml \
@@ -217,31 +222,31 @@ pub enum ObservedEcuSignal {
 }
 ```
 
-- [ ] **Step 1: Failing round-trip tests**
+- [x] **Step 1: Failing round-trip tests**
 
 Extend `remotive_observed_signal_contract.rs` with Ok/Fail encode/decode for
 both IDs (mirror hazard tests).
 
-- [ ] **Step 2: Run tests — expect FAIL**
+- [x] **Step 2: Run tests — expect FAIL**
 
 ```bash
 cargo test -p common --test remotive_observed_signal_contract -- --nocapture
 ```
 
-- [ ] **Step 3: Implement signal encode/decode + gateway mapping**
+- [x] **Step 3: Implement signal encode/decode + gateway mapping**
 
 Update `ObservedEcuSignal::{from_can_frame,to_can_frame}` and gateway
 `ingress/mapping.rs` unit tests that list `0x105..=0x107` to include
 `0x108`/`0x109`.
 
-- [ ] **Step 4: Run tests — expect PASS**
+- [x] **Step 4: Run tests — expect PASS**
 
 ```bash
 cargo test -p common --test remotive_observed_signal_contract
 cargo test -p gateway --lib ingress::mapping
 ```
 
-- [ ] **Step 5: Commit (after user approval)**
+- [x] **Step 5: Commit (after user approval)**
 
 ```bash
 git add crates/common/src/signals.rs \
@@ -289,27 +294,27 @@ after an observation). Clear when both sides Ok and not silent.
 
 PowerOn / BecomeOn: statuses Unknown, silent false. BecomeOff: reset.
 
-- [ ] **Step 1: Write failing pure contracts**
+- [x] **Step 1: Write failing pure contracts**
 
 Tests: default Unknown; Ok observation; Fail sets Off; silence flag helper;
 diagnostic formatting includes `flcm` / `silent` / `fail` facts (ASCII, no UI
 chrome).
 
-- [ ] **Step 2: Implement context + diagnostic variant + runtime wiring**
+- [x] **Step 2: Implement context + diagnostic variant + runtime wiring**
 
 Emit `DiagnosticRecord::warning(..., DiagnosticKind::FlcmLampFault { .. })`
 on transition into fault; emit a clearing Info/Text or rely on Notice
 replacement when healthy again — match how other warnings are cleared on TUI
 (driver Notice shows latest eligible diagnostic).
 
-- [ ] **Step 3: Tests PASS**
+- [x] **Step 3: Tests PASS**
 
 ```bash
 cargo test -p common --test flcm_observation_contract
 cargo test -p common diagnostic
 ```
 
-- [ ] **Step 4: Commit (after user approval)**
+- [x] **Step 4: Commit (after user approval)**
 
 ```bash
 git commit -m "feat: FlcmContext liveness and FlcmLampFault diagnostic"
@@ -332,11 +337,11 @@ git commit -m "feat: FlcmContext liveness and FlcmLampFault diagnostic"
 - Missing FLCM object on old ledgers → Unknown / `silent=false`
 - New emits include `flcm` object
 
-- [ ] **Step 1: Failing schema compatibility tests for v7**
+- [x] **Step 1: Failing schema compatibility tests for v7**
 
-- [ ] **Step 2: Implement + regenerate goldens**
+- [x] **Step 2: Implement + regenerate goldens**
 
-- [ ] **Step 3:**
+- [x] **Step 3:**
 
 ```bash
 cargo test -p observation
@@ -344,11 +349,22 @@ cargo test -p observation
 
 Expected: PASS
 
-- [ ] **Step 4: Commit (after user approval)**
+- [x] **Step 4: Commit (after user approval)**
 
 ```bash
 git commit -m "feat(observation): schema v7 FLCM low-beam status"
 ```
+
+- [x] **Step 5 (post-review): schema v8 for the FLCM observation events**
+
+The final review found FLCM observations published as `TimerTick`, making them
+indistinguishable from ticks in the ledger. `PublishedFsmEvent` /
+`FsmEventV1::{LeftLowBeamStatusObserved, RightLowBeamStatusObserved}` were added
+(`{"type":"left_low_beam_status_observed","ok":true}`), which a v7 reader cannot
+parse — hence `CURRENT_SCHEMA_VERSION = 8` plus a v8 golden run and a v7 golden
+read-back test. `AssemblyZoneReady` (which carries the silence verdict) stays an
+unpublished `TimerTick` placeholder; a silence row is identified by
+`current_ctx.flcm.silent`.
 
 ---
 
@@ -366,21 +382,21 @@ git commit -m "feat(observation): schema v7 FLCM low-beam status"
   type in spike; extend decoder if integer-only)
 - Readiness string lists all **five** identities in locked order
 
-- [ ] **Step 1: Failing subscription tests (exactly five ordered IDs)**
+- [x] **Step 1: Failing subscription tests (exactly five ordered IDs)**
 
 Replace Phase III “rejects widening” test: still reject **unlisted** Hello
 World distractors, but allow the two FLCM status signals.
 
-- [ ] **Step 2: Implement subscribe/decode/session writes to `0x108`/`0x109`**
+- [x] **Step 2: Implement subscribe/decode/session writes to `0x108`/`0x109`**
 
-- [ ] **Step 3:**
+- [x] **Step 3:**
 
 ```bash
 cargo test -p remotive_bridge --test config_decoder_cli
 cargo test -p remotive_bridge --test session_contract
 ```
 
-- [ ] **Step 4: Commit (after user approval)**
+- [x] **Step 4: Commit (after user approval)**
 
 ```bash
 git commit -m "feat(remotive_bridge): observe FLCM low-beam status"
@@ -404,17 +420,17 @@ git commit -m "feat(remotive_bridge): observe FLCM low-beam status"
   state, **not** BCM request lines
 - Keep Phase III rule: do not resurrect weather/wiper/lux as attended rows
 
-- [ ] **Step 1: Failing view tests**
+- [x] **Step 1: Failing view tests**
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
-- [ ] **Step 3:**
+- [x] **Step 3:**
 
 ```bash
 cargo test -p tui_dashboard
 ```
 
-- [ ] **Step 4: Commit (after user approval)**
+- [x] **Step 4: Commit (after user approval)**
 
 ```bash
 git commit -m "feat(tui): show FLCM low-beam status and Warning"
@@ -434,15 +450,15 @@ git commit -m "feat(tui): show FLCM low-beam status and Warning"
   diagnostics; at minimum assert context Fail
 - Optional: advance time / TimerTick to assert `silent` if harness allows
 
-- [ ] **Step 1: Add e2e cases**
+- [x] **Step 1: Add e2e cases**
 
-- [ ] **Step 2:**
+- [x] **Step 2:**
 
 ```bash
 cargo test -p gateway --test assembly_interaction_e2e -- --nocapture
 ```
 
-- [ ] **Step 3: Commit (after user approval)**
+- [x] **Step 3: Commit (after user approval)**
 
 ```bash
 git commit -m "test(gateway): FLCM status observation e2e"
@@ -452,95 +468,166 @@ git commit -m "test(gateway): FLCM status observation e2e"
 
 ### Task 8: Live acceptance + run steps (docs in this plan)
 
-**Files:**
-- Update this plan section checkboxes with evidence notes under
-  `.superpowers/sdd/phase-iv/` (gitignored screenshots OK)
-- Optionally add a short subsection to
-  `docs/superpowers/runbooks/2026-09-12-phase-ii-stage-2-local-run.md`
-  linking Phase IV inject — only if it reduces operator confusion; else keep
-  commands here
+**Status:** automated Twin coverage is GREEN; **live acceptance is operator-blocked**
+pending `remotivebusd`. Steps 1–8 below are the committed run steps — nothing needed
+from a gitignored report. Evidence for the blocked attempt lives (locally, gitignored)
+under `.superpowers/sdd/phase-iv/`.
+
+**Blocker (unchanged since 2026-09-16):** `remotivebusd` is `inactive` and
+`/run/docker/plugins/remotivebus.sock` is absent, so Hello World compose cannot create
+the RemotiveBus CAN networks:
+
+```text
+failed to create network remotive_car_hello_world_BodyCan0:
+dial unix /run/docker/plugins/remotivebus.sock: connect: no such file or directory
+```
+
+`sudo -n systemctl start remotivebusd` requires a password on this host. Docker itself is
+healthy; this is a host-privilege gate, not a code defect, and re-running it later needs
+no Twin change.
 
 #### Live run order
+
+- [ ] **Step 0: RemotiveBus prerequisite (root)**
+
+Passwordless Docker is not enough — start the RemotiveBus Docker network plugin first:
+
+```bash
+sudo systemctl start remotivebusd
+systemctl is-active remotivebusd            # expect: active
+ls -l /run/docker/plugins/remotivebus.sock  # must exist before compose
+```
 
 - [ ] **Step 1: Remotive branch + Hello World**
 
 ```bash
 cd /home/nirmalya/Workspace-Rust/Eclipse-SDV/RemotiveLabs/remotivelabs-topology-examples
 git checkout demo/flcm-lamp-status-feedback
-# start Hello World with Jupyter + 3D car profiles (same as Phase III)
+
+remotive topology build --no-workspace \
+  -f remotive_car/instances/hello_world/main.instance.yaml \
+  remotive_car/build
+
+cd remotive_car/build/remotive_car_hello_world
+docker compose -p remotive_car_hello_world -f docker-compose.yml \
+  --profile jupyter --profile 3dcar \
+  up --build -d
+
+ss -ltn | grep -E '3000|8888|50051'
 ```
 
-Open cute car `http://127.0.0.1:3000` and Jupyter.
+Cute car `http://127.0.0.1:3000`; Jupyter `http://127.0.0.1:8888` (token
+`remotivelabs`). Do **not** `curl` the broker port `50051`.
 
-- [ ] **Step 2: Twin attach**
+- [ ] **Step 2: Twin attach (Gateway first)**
 
 ```bash
-# vcan0 up
+sudo ip link add dev vcan0 type vcan 2>/dev/null || true
+sudo ip link set up vcan0
+
+cd /home/nirmalya/Workspace-Rust/Eclipse-SDV/Self-handson-project/sdv_simulation_remotive
+# Terminal A
 cargo run -p gateway -- --uds observation.sock --connect-timeout 120
+# Terminal B
 cargo run -p tui_dashboard -- --uds observation.sock
+# Terminal C
 cargo run -p remotive_bridge -- \
   --broker-url http://127.0.0.1:50051 \
   --can-interface vcan0
 # optional motion: --rpm-clamp 3000
 ```
 
-Require readiness line listing **five** signals including both
-`FLCM-BodyCan0:LowBeamLightStatus.*`.
+Require this **five-signal** readiness line (locked order) **before** PowerOn — it is
+asserted byte-for-byte by `cargo test -p remotive_bridge --test config_decoder_cli
+subscription_ready_status_proves_connection_and_exact_target`:
+
+```text
+[remotive_bridge] connected; subscribed signals=\
+SCCM-DriverCan0:HazardLightButton.HazardLightButton,\
+BCM-BodyCan0:TurnLightControl.LeftTurnLightRequest,\
+BCM-BodyCan0:TurnLightControl.RightTurnLightRequest,\
+FLCM-BodyCan0:LowBeamLightStatus.LeftLowBeamLightStatus,\
+FLCM-BodyCan0:LowBeamLightStatus.RightLowBeamLightStatus
+```
 
 - [ ] **Step 3: Healthy baseline**
 
-Jupyter: set light mode / low beams ON.  
-Expect: cute car front low beams ON; TUI low-beam L/R **OK**; no FLCM Warning.
+Jupyter (existing light-stalk widgets): set light mode / low beams ON.  
+Expect: cute car front low beams ON; TUI low-beam L/R **OK**; `FLCM: alive`; no FLCM
+Warning.
 
 - [ ] **Step 4: Fault — Fail**
 
-Send FLCM control `flcm_fault=fail` (exact Jupyter snippet to be pasted after
-Task 1 spike — use Remotive control API same style as `emergency_mode` on BCM).
+Same `ControlClient` pattern as BCM `emergency_mode`; the notebook kernel already holds
+`c`. Do **not** invent a second inject mechanism.
 
-Expect: TUI Warning + status FAIL; **cute car still ON**.
+```python
+from remotivelabs.topology.control import ControlClient, ControlRequest
+
+async with ControlClient(client=c) as cc:
+    await cc.send("FLCM", ControlRequest(type="flcm_fault", argument="fail"))
+    # expect: TUI Warning + Low beam L/R FAIL; cute car still ON
+```
 
 - [ ] **Step 5: Fault — Silent**
 
-Send `flcm_fault=silent`. Within **500 ms**: TUI Warning silent; cute car still
-ON.
+```python
+    await cc.send("FLCM", ControlRequest(type="flcm_fault", argument="silent"))
+    # expect within 500 ms: TUI Warning silent=true, rows read "OK (stale)" /
+    # "FLCM: SILENT"; cute car still ON
+```
 
 - [ ] **Step 6: Resume**
 
-`flcm_fault=ok` → Warning clears; status OK.
+```python
+    await cc.send("FLCM", ControlRequest(type="flcm_fault", argument="ok"))
+    # expect: Warning clears (Info FlcmLampFault); status OK; FLCM: alive
+```
 
 - [ ] **Step 7: Phase III still works**
 
-Hazard pulse → latch ON; cute car blinks; TUI Hazard ON.
+Existing notebook hazard pulse → latch ON; cute car blinks; TUI Hazard ON.
 
-- [ ] **Step 8: Shutdown**
+- [ ] **Step 8: Shutdown (existing order)**
 
-SIGINT bridge → compose down → remotivebusd stop (existing order).
+SIGINT `remotive_bridge` first, then:
+
+```bash
+cd /home/nirmalya/Workspace-Rust/Eclipse-SDV/RemotiveLabs/remotivelabs-topology-examples/remotive_car/build/remotive_car_hello_world
+docker compose -p remotive_car_hello_world -f docker-compose.yml \
+  --profile jupyter --profile 3dcar down
+sudo systemctl stop remotivebusd
+```
+
+Do not stop `remotivebusd` while Hello World containers are still up.
 
 ---
 
 ### Task 9: Verification gate
 
-- [ ] **Step 1: Twin tests**
+- [x] **Step 1: Twin tests**
 
 ```bash
 cargo test -p common --test flcm_observation_contract
 cargo test -p common --test remotive_observed_signal_contract
+cargo test -p common                 # includes the transition-table self-loop test
 cargo test -p observation
 cargo test -p remotive_bridge
 cargo test -p tui_dashboard
 cargo test -p gateway --test assembly_interaction_e2e
 ```
 
-Expected: PASS
+Expected: PASS. `cargo test -p observation --test live_zenoh_roundtrip` needs real
+loopback networking; it fails under a network-restricted sandbox and passes on the host.
 
-- [ ] **Step 2: Confirm deferred items untouched**
+- [x] **Step 2: Confirm deferred items untouched**
 
 - No BCM consumption of FLCM Status
 - No cute-car remap
 - No RLCM/E2E/asymmetric hazard work
 - No Twin→Remotive actuation
 
-- [ ] **Step 3: Review checkpoint — commit docs only if user asks**
+- [x] **Step 3: Review checkpoint — commit docs only if user asks**
 
 ---
 
@@ -557,6 +644,21 @@ Expected: PASS
 | Carriers / gateway | 2, 7 |
 | Run steps + acceptance | 8, 9 |
 | No Twin actuation / no BCM teach | Global + 9 |
+
+## Acceptance status
+
+| # | Acceptance | Status |
+|---|-----------|--------|
+| 1 | Remotive edits only on `demo/flcm-lamp-status-feedback` | Met |
+| 2 | Cute car ON + TUI Status OK when healthy | Automated GREEN (Twin side); live pending |
+| 3 | Fault inject → TUI Warning, cute car still ON | Automated GREEN; live pending |
+| 4 | Resume → Warning clears | Automated GREEN (Info clear) |
+| 5 | Phase III hazard + latch still work on the five-signal subscribe | Automated GREEN |
+| 6 | Plan/run steps document branch, inject, attach order | Met — Task 8 above |
+| 7 | No Twin actuation into Remotive | Met (e2e asserts an empty actuation channel) |
+
+Posture: Twin code merges as "automated GREEN, live acceptance pending
+(`remotivebusd` privilege)". Only Task 8 Steps 0–8 remain, and they need no Twin change.
 
 ## Jupyter / pytest control snippet (locked API shape)
 
