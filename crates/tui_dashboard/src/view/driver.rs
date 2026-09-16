@@ -71,6 +71,22 @@ pub fn driver_pane(
                 .unwrap_or(PublishedObservedBool::Unknown),
             width,
         ),
+        PaneLine::spacer(width),
+        low_beam_pane_line(
+            "Low beam L: ",
+            ledger
+                .map(|row| row.current_ctx.flcm.left_low_beam_status_ok)
+                .unwrap_or(PublishedObservedBool::Unknown),
+            width,
+        ),
+        PaneLine::spacer(width),
+        low_beam_pane_line(
+            "Low beam R: ",
+            ledger
+                .map(|row| row.current_ctx.flcm.right_low_beam_status_ok)
+                .unwrap_or(PublishedObservedBool::Unknown),
+            width,
+        ),
     ];
     DriverPane { lines }
 }
@@ -80,6 +96,15 @@ fn format_observed_bool(value: PublishedObservedBool) -> &'static str {
         PublishedObservedBool::Unknown => "UNKNOWN",
         PublishedObservedBool::Off => "OFF",
         PublishedObservedBool::On => "ON",
+    }
+}
+
+/// FLCM status wire: `On` = OK, `Off` = Fail, `Unknown` = not yet observed.
+fn format_low_beam_status(value: PublishedObservedBool) -> &'static str {
+    match value {
+        PublishedObservedBool::Unknown => "UNKNOWN",
+        PublishedObservedBool::Off => "FAIL",
+        PublishedObservedBool::On => "OK",
     }
 }
 
@@ -112,8 +137,21 @@ fn format_notice_body(diagnostic: Option<&DiagnosticRecord>) -> String {
         }
         DiagnosticKind::HeadlampActuationUnconfirmed { .. }
         | DiagnosticKind::RainChanged { .. }
-        | DiagnosticKind::WiperMotionChanged { .. }
-        | DiagnosticKind::FlcmLampFault { .. } => "(no notice yet)".to_owned(),
+        | DiagnosticKind::WiperMotionChanged { .. } => "(no notice yet)".to_owned(),
+        DiagnosticKind::FlcmLampFault {
+            silent,
+            left_fail,
+            right_fail,
+        } => {
+            if d.level == DiagnosticLevel::Warning {
+                format!(
+                    "{} — FLCM low beam fault silent={silent} left_fail={left_fail} right_fail={right_fail}",
+                    format_level(d.level)
+                )
+            } else {
+                "(no notice yet)".to_owned()
+            }
+        }
         DiagnosticKind::ActuationFailure { action, error } => format!(
             "{} — Actuation failure ({action}: {error})",
             format_level(d.level)
@@ -218,6 +256,14 @@ fn speed_pane_line(ledger: Option<&PublishedTransitionRecord>, width: usize) -> 
 }
 
 fn observed_pane_line(label: &str, value: PublishedObservedBool, width: usize) -> PaneLine {
+    labeled_visibility_line(label, format_observed_bool(value), width)
+}
+
+fn low_beam_pane_line(label: &str, value: PublishedObservedBool, width: usize) -> PaneLine {
+    labeled_visibility_line(label, format_low_beam_status(value), width)
+}
+
+fn labeled_visibility_line(label: &str, value: &str, width: usize) -> PaneLine {
     let line = PaneLine {
         role: LineRole::Visibility,
         segments: vec![
@@ -227,7 +273,7 @@ fn observed_pane_line(label: &str, value: PublishedObservedBool, width: usize) -
             },
             Segment {
                 style: SegmentStyle::Default,
-                content: SegmentContent::Text(format_observed_bool(value).to_owned()),
+                content: SegmentContent::Text(value.to_owned()),
             },
         ],
     };
@@ -412,6 +458,54 @@ mod tests {
                 cause: FrontHeadlampIncompleteCause::NegativeAck,
             }
         ));
+        assert!(should_update_notice(&DiagnosticKind::FlcmLampFault {
+            silent: true,
+            left_fail: true,
+            right_fail: false,
+        }));
+    }
+
+    #[test]
+    fn driver_notice_shows_flcm_lamp_fault_warning_with_facts() {
+        let diag = sample_diag(DiagnosticKind::FlcmLampFault {
+            silent: true,
+            left_fail: true,
+            right_fail: false,
+        });
+        let ledger = sample_ledger(10, 100, PublishedHeadlampState::On);
+        let pane = driver_pane(Some(&diag), Some(&ledger), 96);
+        let notice = pane
+            .lines
+            .iter()
+            .find(|l| l.role == LineRole::Notice)
+            .unwrap()
+            .text();
+        assert!(notice.contains("Notice: Warning"), "{notice}");
+        assert!(notice.contains("FLCM low beam fault"), "{notice}");
+        assert!(notice.contains("silent=true"), "{notice}");
+        assert!(notice.contains("left_fail=true"), "{notice}");
+        assert!(notice.contains("right_fail=false"), "{notice}");
+        assert!(!notice.contains("(no notice yet)"), "{notice}");
+    }
+
+    #[test]
+    fn driver_notice_clears_warning_for_info_flcm_lamp_fault() {
+        let mut diag = sample_diag(DiagnosticKind::FlcmLampFault {
+            silent: false,
+            left_fail: false,
+            right_fail: false,
+        });
+        diag.level = DiagnosticLevel::Info;
+        let ledger = sample_ledger(10, 100, PublishedHeadlampState::On);
+        let pane = driver_pane(Some(&diag), Some(&ledger), 80);
+        let notice = pane
+            .lines
+            .iter()
+            .find(|l| l.role == LineRole::Notice)
+            .unwrap()
+            .text();
+        assert!(notice.contains("(no notice yet)"), "{notice}");
+        assert!(!notice.contains("Warning"), "{notice}");
     }
 
     #[test]
@@ -447,7 +541,9 @@ mod tests {
         assert!(labels.iter().any(|t| t.contains("Hazard:")));
         assert!(labels.iter().any(|t| t.contains("Left request:")));
         assert!(labels.iter().any(|t| t.contains("Right request:")));
-        assert_eq!(labels.len(), 3);
+        assert!(labels.iter().any(|t| t.contains("Low beam L:")));
+        assert!(labels.iter().any(|t| t.contains("Low beam R:")));
+        assert_eq!(labels.len(), 5);
     }
 
     #[test]
@@ -541,6 +637,8 @@ mod tests {
         assert!(text.contains("Hazard: UNKNOWN"), "{text}");
         assert!(text.contains("Left request: UNKNOWN"), "{text}");
         assert!(text.contains("Right request: UNKNOWN"), "{text}");
+        assert!(text.contains("Low beam L: UNKNOWN"), "{text}");
+        assert!(text.contains("Low beam R: UNKNOWN"), "{text}");
     }
 
     #[test]
@@ -565,11 +663,13 @@ mod tests {
     }
 
     #[test]
-    fn driver_attended_labels_are_exactly_speed_hazard_left_right() {
+    fn driver_attended_labels_are_speed_hazard_turns_and_low_beam() {
         let mut ledger = sample_ledger(42, 150, PublishedHeadlampState::On);
         ledger.current_ctx.sccm.hazard_mode_on = PublishedObservedBool::On;
         ledger.current_ctx.bcm.left_turn_request_on = PublishedObservedBool::On;
         ledger.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::On;
+        ledger.current_ctx.flcm.left_low_beam_status_ok = PublishedObservedBool::On;
+        ledger.current_ctx.flcm.right_low_beam_status_ok = PublishedObservedBool::Off;
         ledger.current_ctx.weather.raining = true;
         ledger.current_ctx.visibility.ambient_lux = 999;
         ledger.current_ctx.wiper.state = PublishedWiperState::Running;
@@ -580,6 +680,10 @@ mod tests {
         assert!(text.contains("Hazard: ON"), "{text}");
         assert!(text.contains("Left request: ON"), "{text}");
         assert!(text.contains("Right request: ON"), "{text}");
+        assert!(text.contains("Low beam L: OK"), "{text}");
+        assert!(text.contains("Low beam R: FAIL"), "{text}");
+        assert!(!text.contains("Low beam L: ON"), "{text}");
+        assert!(!text.contains("Low beam R: OFF"), "{text}");
 
         for forbidden in [
             "Visibility:",
@@ -594,6 +698,22 @@ mod tests {
         ] {
             assert!(!text.contains(forbidden), "found {forbidden:?} in {text}");
         }
+    }
+
+    #[test]
+    fn driver_low_beam_rows_come_from_flcm_not_headlamp_or_bcm() {
+        let mut ledger = sample_ledger(10, 100, PublishedHeadlampState::On);
+        ledger.current_ctx.headlamp.state = PublishedHeadlampState::On;
+        ledger.current_ctx.bcm.left_turn_request_on = PublishedObservedBool::On;
+        ledger.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::On;
+        ledger.current_ctx.flcm.left_low_beam_status_ok = PublishedObservedBool::Off;
+        ledger.current_ctx.flcm.right_low_beam_status_ok = PublishedObservedBool::Unknown;
+        let text = pane_text(&driver_pane(None, Some(&ledger), 64));
+        assert!(text.contains("Low beam L: FAIL"), "{text}");
+        assert!(text.contains("Low beam R: UNKNOWN"), "{text}");
+        assert!(!text.contains("Low beam L: ON"), "{text}");
+        assert!(!text.contains("Low beam R: ON"), "{text}");
+        assert!(!text.contains("Low beam L: OFF"), "{text}");
     }
 
     #[test]

@@ -53,6 +53,22 @@ pub fn engineer_pane(ledger: Option<&PublishedTransitionRecord>, width: usize) -
             ),
             width,
         ),
+        PaneLine::plain_fitted(
+            LineRole::EngineerAssembly,
+            &format!(
+                "  Low beam L: {}",
+                format_low_beam_status(row.current_ctx.flcm.left_low_beam_status_ok)
+            ),
+            width,
+        ),
+        PaneLine::plain_fitted(
+            LineRole::EngineerAssembly,
+            &format!(
+                "  Low beam R: {}",
+                format_low_beam_status(row.current_ctx.flcm.right_low_beam_status_ok)
+            ),
+            width,
+        ),
     ];
     EngineerPane { lines }
 }
@@ -94,6 +110,15 @@ fn format_observed_bool(value: PublishedObservedBool) -> &'static str {
         PublishedObservedBool::Unknown => "UNKNOWN",
         PublishedObservedBool::Off => "OFF",
         PublishedObservedBool::On => "ON",
+    }
+}
+
+/// FLCM status wire: `On` = OK, `Off` = Fail, `Unknown` = not yet observed.
+fn format_low_beam_status(value: PublishedObservedBool) -> &'static str {
+    match value {
+        PublishedObservedBool::Unknown => "UNKNOWN",
+        PublishedObservedBool::Off => "FAIL",
+        PublishedObservedBool::On => "OK",
     }
 }
 
@@ -210,6 +235,8 @@ mod tests {
         let text = pane_text(&engineer_pane(Some(&sample_ledger()), 64));
         assert!(text.contains("SCCM: Hazard UNKNOWN"), "{text}");
         assert!(text.contains("BCM: Off  Left UNKNOWN  Right UNKNOWN"), "{text}");
+        assert!(text.contains("Low beam L: UNKNOWN"), "{text}");
+        assert!(text.contains("Low beam R: UNKNOWN"), "{text}");
         assert!(!text.contains("Headlamp:"), "{text}");
         assert!(!text.contains("Wiper:"), "{text}");
     }
@@ -243,9 +270,27 @@ mod tests {
         assert!(text.contains("BCM: Ready"), "{text}");
         assert!(text.contains("Left ON"), "{text}");
         assert!(text.contains("Right ON"), "{text}");
+        assert!(text.contains("Low beam L: UNKNOWN"), "{text}");
+        assert!(text.contains("Low beam R: UNKNOWN"), "{text}");
         for forbidden in ["Headlamp:", "Wiper:", "Weather:", "Visibility:", "lux"] {
             assert!(!text.contains(forbidden), "found {forbidden:?} in {text}");
         }
+    }
+
+    #[test]
+    fn engineer_shows_low_beam_status_from_flcm_not_headlamp() {
+        let mut ledger = sample_ledger();
+        ledger.current_ctx.headlamp.state = PublishedHeadlampState::On;
+        ledger.current_ctx.bcm.left_turn_request_on = PublishedObservedBool::On;
+        ledger.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::On;
+        ledger.current_ctx.flcm.left_low_beam_status_ok = PublishedObservedBool::On;
+        ledger.current_ctx.flcm.right_low_beam_status_ok = PublishedObservedBool::Off;
+        let text = pane_text(&engineer_pane(Some(&ledger), 64));
+        assert!(text.contains("Low beam L: OK"), "{text}");
+        assert!(text.contains("Low beam R: FAIL"), "{text}");
+        assert!(!text.contains("Low beam L: ON"), "{text}");
+        assert!(!text.contains("Low beam R: OFF"), "{text}");
+        assert!(!text.contains("Headlamp:"), "{text}");
     }
 
     #[test]
