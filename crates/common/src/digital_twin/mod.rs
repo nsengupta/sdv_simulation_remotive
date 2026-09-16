@@ -301,6 +301,9 @@ pub enum ZoneSpontaneousEvent {
         cause: crate::fsm::FrontHeadlampIncompleteCause,
         reply: crate::vehicle_state::HeadlampZoneReply,
     },
+    Flcm {
+        reply: crate::vehicle_state::FlcmZoneReply,
+    },
 }
 
 impl From<FsmEvent> for TwinMessage {

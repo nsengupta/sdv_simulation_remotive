@@ -257,15 +257,9 @@ async fn runtime_warns_once_after_500ms_silence_and_clears_on_healthy_traffic() 
             .await
             .expect("healthy FLCM status");
     }
-    tokio::time::sleep(Duration::from_millis(510)).await;
-    controller
-        .submit_twin_ingress(TwinIngressEvent::TimerTick)
+    let warning = tokio::time::timeout(Duration::from_millis(750), diagnostic_rx.recv())
         .await
-        .expect("timer tick");
-
-    let warning = tokio::time::timeout(Duration::from_millis(250), diagnostic_rx.recv())
-        .await
-        .expect("warning timeout")
+        .expect("autonomous silence warning timeout")
         .expect("diagnostic channel closed");
     assert_eq!(warning.level, DiagnosticLevel::Warning);
     assert!(matches!(
@@ -277,12 +271,8 @@ async fn runtime_warns_once_after_500ms_silence_and_clears_on_healthy_traffic() 
         }
     ));
 
-    controller
-        .submit_twin_ingress(TwinIngressEvent::TimerTick)
-        .await
-        .expect("second timer tick");
     assert!(
-        tokio::time::timeout(Duration::from_millis(50), diagnostic_rx.recv())
+        tokio::time::timeout(Duration::from_millis(100), diagnostic_rx.recv())
             .await
             .is_err(),
         "silent interval emitted more than one warning"

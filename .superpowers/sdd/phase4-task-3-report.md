@@ -50,3 +50,22 @@
 - Task 6 must provide attended TUI formatting; the native variant is currently hidden there,
   while the unchanged v1 wire path carries an ASCII `Text` fallback.
 - Workspace check retains one pre-existing TUI unused-import warning.
+
+## Review Fix — Autonomous Silence Deadline
+
+- `FlcmActor` now owns a cancellable 500 ms `send_after` deadline, armed on `BecomeOn`
+  and reset after every left/right status observation.
+- `BecomeOff` and actor shutdown cancel the deadline; generation IDs reject stale elapsed
+  messages after a refresh or power transition.
+- Deadline expiry marks the actor context silent and reports a spontaneous FLCM reply to
+  `VirtualCarActor`, which commits the context and emits the latched `FlcmLampFault` Warning.
+- The runtime contract no longer injects `TwinIngressEvent::TimerTick`; its initial red run
+  timed out after 750 ms, then passed after the actor-owned timer was implemented.
+
+## Review Fix Verification
+
+- `cargo test -p common --test flcm_observation_contract`: 10 passed.
+- `cargo test -p common diagnostic`: 8 unit + 1 integration test passed.
+- `cargo test -p common`: 293 unit + 10 FLCM integration tests passed.
+- `cargo check --workspace --all-targets`: passed with one pre-existing TUI unused-import warning.
+- `git diff --check`: passed.

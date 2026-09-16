@@ -1,13 +1,16 @@
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use ractor::{Actor, ActorProcessingErr, ActorRef};
+use ractor::concurrency::{Duration as RactorDuration, JoinHandle};
+use ractor::{Actor, ActorProcessingErr, ActorRef, MessagingErr};
 
-use crate::digital_twin::{TwinMessage, ZoneReply};
+use crate::digital_twin::{TwinMessage, ZoneReply, ZoneSpontaneousEvent};
 use crate::twin_runtime::observation_streak::ObservationStreak;
 use crate::vehicle_state::{FlcmContext, FlcmMessage, FlcmZoneReply, ObservationDisposition};
 
 pub const FLCM_SILENCE_THRESHOLD: Duration = Duration::from_millis(500);
+
+type SilenceTimer = JoinHandle<Result<(), MessagingErr<FlcmActorMsg>>>;
 
 #[derive(Debug)]
 pub struct FlcmActorVocabulary {
@@ -21,6 +24,7 @@ pub struct FlcmActorVocabulary {
 #[derive(Debug)]
 pub enum FlcmActorMsg {
     Apply(FlcmActorVocabulary),
+    SilenceDeadlineElapsed { deadline_id: u64 },
 }
 
 #[derive(Debug)]
@@ -31,6 +35,9 @@ pub struct FlcmActorState {
     pub last_status_at: Option<Instant>,
     pub left_streak: ObservationStreak<bool>,
     pub right_streak: ObservationStreak<bool>,
+    brain: Option<ActorRef<TwinMessage>>,
+    silence_timer: Option<SilenceTimer>,
+    deadline_id: u64,
 }
 
 impl FlcmActorState {
@@ -42,6 +49,9 @@ impl FlcmActorState {
             last_status_at: None,
             left_streak: ObservationStreak::default(),
             right_streak: ObservationStreak::default(),
+            brain: None,
+            silence_timer: None,
+            deadline_id: 0,
         }
     }
 }
@@ -65,15 +75,50 @@ impl Actor for FlcmActor {
 
     async fn handle(
         &self,
-        _myself: ActorRef<Self::Msg>,
+        myself: ActorRef<Self::Msg>,
         message: Self::Msg,
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
-        let FlcmActorMsg::Apply(vocab) = message;
+        match message {
+            FlcmActorMsg::Apply(vocab) => {
+                Self::handle_apply(&myself, state, vocab)?;
+            }
+            FlcmActorMsg::SilenceDeadlineElapsed { deadline_id } => {
+                Self::handle_silence_deadline(state, deadline_id)?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn post_stop(
+        &self,
+        _myself: ActorRef<Self::Msg>,
+        state: &mut Self::State,
+    ) -> Result<(), ActorProcessingErr> {
+        abort_silence_timer(&mut state.silence_timer);
+        Ok(())
+    }
+}
+
+impl FlcmActor {
+    fn handle_apply(
+        myself: &ActorRef<FlcmActorMsg>,
+        state: &mut FlcmActorState,
+        vocab: FlcmActorVocabulary,
+    ) -> Result<(), ActorProcessingErr> {
         if state.silent {
             return Ok(());
         }
-        let reply = apply_flcm_message(state, vocab.message, vocab.now);
+        state.brain = Some(vocab.brain.clone());
+        let message = vocab.message;
+        let reply = apply_flcm_message(state, message, vocab.now);
+        match message {
+            FlcmMessage::BecomeOn
+            | FlcmMessage::LeftLowBeamStatusObserved(_)
+            | FlcmMessage::RightLowBeamStatusObserved(_) => arm_silence_timer(myself, state),
+            FlcmMessage::BecomeOff => cancel_silence_deadline(state),
+            FlcmMessage::TimerTick | FlcmMessage::SilenceChanged(_) => {}
+        }
         vocab
             .brain
             .send_message(TwinMessage::ZoneReady {
@@ -88,6 +133,57 @@ impl Actor for FlcmActor {
                 )))
             })
     }
+
+    fn handle_silence_deadline(
+        state: &mut FlcmActorState,
+        deadline_id: u64,
+    ) -> Result<(), ActorProcessingErr> {
+        if deadline_id != state.deadline_id || !state.powered {
+            return Ok(());
+        }
+        state.silence_timer = None;
+        let Some(brain) = state.brain.clone() else {
+            return Ok(());
+        };
+        let reply = state
+            .ctx
+            .on_receiving_message(FlcmMessage::SilenceChanged(true));
+        state.ctx = reply.ctx.clone();
+        brain
+            .send_message(TwinMessage::ZoneSpontaneous {
+                zone_id: crate::fsm::AssemblyId::Flcm,
+                event: ZoneSpontaneousEvent::Flcm { reply },
+            })
+            .map_err(|e| {
+                ActorProcessingErr::from(std::io::Error::other(format!(
+                    "FlcmActor ZoneSpontaneous tell-back: {e:?}"
+                )))
+            })
+    }
+}
+
+fn abort_silence_timer(timer: &mut Option<SilenceTimer>) {
+    if let Some(handle) = timer.take() {
+        handle.abort();
+    }
+}
+
+fn cancel_silence_deadline(state: &mut FlcmActorState) {
+    abort_silence_timer(&mut state.silence_timer);
+    state.deadline_id = state.deadline_id.wrapping_add(1);
+}
+
+fn arm_silence_timer(myself: &ActorRef<FlcmActorMsg>, state: &mut FlcmActorState) {
+    cancel_silence_deadline(state);
+    if !state.powered {
+        return;
+    }
+    let deadline_id = state.deadline_id;
+    state.silence_timer = Some(
+        myself.send_after(RactorDuration::from(FLCM_SILENCE_THRESHOLD), move || {
+            FlcmActorMsg::SilenceDeadlineElapsed { deadline_id }
+        }),
+    );
 }
 
 fn apply_flcm_message(

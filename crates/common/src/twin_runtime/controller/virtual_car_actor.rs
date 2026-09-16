@@ -633,23 +633,29 @@ impl VirtualCarActor {
     /// `barrier_queue`. The event is committed directly; the drain loop runs afterwards.
     async fn on_zone_spontaneous(
         runtime_state: &mut VirtualCarRuntimeState,
-        _assembly_id: AssemblyId, // headlamp-only; wiper has no spontaneous events
+        assembly_id: AssemblyId,
         event: crate::digital_twin::ZoneSpontaneousEvent,
     ) -> Result<(), ActorProcessingErr> {
-        let crate::digital_twin::ZoneSpontaneousEvent::Headlamp {
-            direction,
-            cause,
-            reply,
-        } = event;
+        let (ingress, reply) = match event {
+            crate::digital_twin::ZoneSpontaneousEvent::Headlamp {
+                direction,
+                cause,
+                reply,
+            } => (
+                FsmEvent::FrontHeadlampActuationIncomplete { direction, cause },
+                ZoneReply::Headlamp(reply),
+            ),
+            crate::digital_twin::ZoneSpontaneousEvent::Flcm { reply } => (
+                FsmEvent::AssemblyZoneReady(AssemblyId::Flcm),
+                ZoneReply::Flcm(reply),
+            ),
+        };
         Self::commit_resolved_turn(
             runtime_state,
             ResolvedTurn {
-                ingress: FsmEvent::FrontHeadlampActuationIncomplete { direction, cause },
+                ingress,
                 now: Instant::now(),
-                zone_replies: ZoneReplies::with_reply(
-                    AssemblyId::Headlamp,
-                    ZoneReply::Headlamp(reply),
-                ),
+                zone_replies: ZoneReplies::with_reply(assembly_id, reply),
             },
         )
         .await
@@ -717,9 +723,7 @@ impl VirtualCarActor {
         let emit_flcm_diagnostic = if flcm_lifecycle.is_some() {
             runtime_state.flcm_warning_active = false;
             false
-        } else if !runtime_state.flcm_warning_active
-            && final_step.modified_ctx.flcm.has_fault()
-        {
+        } else if !runtime_state.flcm_warning_active && final_step.modified_ctx.flcm.has_fault() {
             runtime_state.flcm_warning_active = true;
             true
         } else if runtime_state.flcm_warning_active
