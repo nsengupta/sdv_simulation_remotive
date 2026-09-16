@@ -1,4 +1,4 @@
-use crate::decoder::decode_boolean;
+use crate::decoder::{decode_boolean, decode_ok_fail};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use emulator::models::{PhysicalWorldModelConfig, RpmModel};
@@ -6,6 +6,7 @@ use remotivelabs_broker::{
     Connection,
     generated::base::{
         ClientId, NameSpace, Signal, SignalId, SignalIds, Signals, SubscriberConfig,
+        signal::Payload,
     },
 };
 use std::collections::VecDeque;
@@ -18,12 +19,25 @@ pub const HAZARD_NAME: &str = "HazardLightButton.HazardLightButton";
 pub const TURN_NAMESPACE: &str = "BCM-BodyCan0";
 pub const LEFT_TURN_NAME: &str = "TurnLightControl.LeftTurnLightRequest";
 pub const RIGHT_TURN_NAME: &str = "TurnLightControl.RightTurnLightRequest";
+pub const FLCM_NAMESPACE: &str = "FLCM-BodyCan0";
+pub const LEFT_LOW_BEAM_STATUS_NAME: &str = "LowBeamLightStatus.LeftLowBeamLightStatus";
+pub const RIGHT_LOW_BEAM_STATUS_NAME: &str = "LowBeamLightStatus.RightLowBeamLightStatus";
+
+const SUBSCRIBED_SIGNALS: [(&str, &str); 5] = [
+    (HAZARD_NAMESPACE, HAZARD_NAME),
+    (TURN_NAMESPACE, LEFT_TURN_NAME),
+    (TURN_NAMESPACE, RIGHT_TURN_NAME),
+    (FLCM_NAMESPACE, LEFT_LOW_BEAM_STATUS_NAME),
+    (FLCM_NAMESPACE, RIGHT_LOW_BEAM_STATUS_NAME),
+];
 
 pub fn subscription_ready_status() -> String {
-    format!(
-        "[remotive_bridge] connected; subscribed signals={HAZARD_NAMESPACE}:{HAZARD_NAME},\
-{TURN_NAMESPACE}:{LEFT_TURN_NAME},{TURN_NAMESPACE}:{RIGHT_TURN_NAME}"
-    )
+    let signals = SUBSCRIBED_SIGNALS
+        .iter()
+        .map(|(namespace, name)| format!("{namespace}:{name}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("[remotive_bridge] connected; subscribed signals={signals}")
 }
 
 pub fn subscription_config() -> SubscriberConfig {
@@ -32,19 +46,15 @@ pub fn subscription_config() -> SubscriberConfig {
             id: CLIENT_ID.to_owned(),
         }),
         signals: Some(SignalIds {
-            signal_id: [
-                (HAZARD_NAMESPACE, HAZARD_NAME),
-                (TURN_NAMESPACE, LEFT_TURN_NAME),
-                (TURN_NAMESPACE, RIGHT_TURN_NAME),
-            ]
-            .into_iter()
-            .map(|(namespace, name)| SignalId {
-                name: name.to_owned(),
-                namespace: Some(NameSpace {
-                    name: namespace.to_owned(),
-                }),
-            })
-            .collect(),
+            signal_id: SUBSCRIBED_SIGNALS
+                .into_iter()
+                .map(|(namespace, name)| SignalId {
+                    name: name.to_owned(),
+                    namespace: Some(NameSpace {
+                        name: namespace.to_owned(),
+                    }),
+                })
+                .collect(),
         }),
         on_change: false,
         initial_empty: false,
@@ -56,6 +66,8 @@ pub enum BrokerObservation {
     HazardButton(bool),
     LeftTurnRequest(bool),
     RightTurnRequest(bool),
+    LeftLowBeamStatus(bool),
+    RightLowBeamStatus(bool),
     End,
 }
 
@@ -91,13 +103,28 @@ fn report_rejection_count(reason: &str, count: u64) {
     }
 }
 
-fn observation_kind(signal: &Signal) -> Option<fn(bool) -> BrokerObservation> {
+fn observation_kind(
+    signal: &Signal,
+) -> Option<(
+    fn(bool) -> BrokerObservation,
+    fn(Option<&Payload>) -> Option<bool>,
+)> {
     let id = signal.id.as_ref()?;
     let namespace = id.namespace.as_ref()?.name.as_str();
     match (namespace, id.name.as_str()) {
-        (HAZARD_NAMESPACE, HAZARD_NAME) => Some(BrokerObservation::HazardButton),
-        (TURN_NAMESPACE, LEFT_TURN_NAME) => Some(BrokerObservation::LeftTurnRequest),
-        (TURN_NAMESPACE, RIGHT_TURN_NAME) => Some(BrokerObservation::RightTurnRequest),
+        (HAZARD_NAMESPACE, HAZARD_NAME) => Some((BrokerObservation::HazardButton, decode_boolean)),
+        (TURN_NAMESPACE, LEFT_TURN_NAME) => {
+            Some((BrokerObservation::LeftTurnRequest, decode_boolean))
+        }
+        (TURN_NAMESPACE, RIGHT_TURN_NAME) => {
+            Some((BrokerObservation::RightTurnRequest, decode_boolean))
+        }
+        (FLCM_NAMESPACE, LEFT_LOW_BEAM_STATUS_NAME) => {
+            Some((BrokerObservation::LeftLowBeamStatus, decode_ok_fail))
+        }
+        (FLCM_NAMESPACE, RIGHT_LOW_BEAM_STATUS_NAME) => {
+            Some((BrokerObservation::RightLowBeamStatus, decode_ok_fail))
+        }
         _ => None,
     }
 }
@@ -110,11 +137,11 @@ pub fn decode_observation_signals(
         .signal
         .iter()
         .filter_map(|signal| {
-            let Some(build) = observation_kind(signal) else {
+            let Some((build, decode)) = observation_kind(signal) else {
                 rejected.reject_identity();
                 return None;
             };
-            match decode_boolean(signal.payload.as_ref()) {
+            match decode(signal.payload.as_ref()) {
                 Some(value) => Some(build(value)),
                 None => {
                     rejected.reject_payload();

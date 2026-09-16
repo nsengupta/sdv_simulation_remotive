@@ -1,10 +1,11 @@
 use remotive_bridge::cli::{
     DEFAULT_BROKER_URL, DEFAULT_CAN_INTERFACE, DEFAULT_RPM_CLAMP, DEFAULT_TICK_MS, parse_args,
 };
-use remotive_bridge::decoder::decode_boolean;
+use remotive_bridge::decoder::{decode_boolean, decode_ok_fail};
 use remotive_bridge::source::{
-    BrokerObservation, CLIENT_ID, HAZARD_NAME, HAZARD_NAMESPACE, LEFT_TURN_NAME,
-    ObservationRejectCounters, ProfileRpmSource, RIGHT_TURN_NAME, RpmSource, TURN_NAMESPACE,
+    BrokerObservation, CLIENT_ID, FLCM_NAMESPACE, HAZARD_NAME, HAZARD_NAMESPACE,
+    LEFT_LOW_BEAM_STATUS_NAME, LEFT_TURN_NAME, ObservationRejectCounters, ProfileRpmSource,
+    RIGHT_LOW_BEAM_STATUS_NAME, RIGHT_TURN_NAME, RpmSource, TURN_NAMESPACE,
     decode_observation_signals, subscription_config, subscription_ready_status,
 };
 use remotivelabs_broker::generated::base::signal::Payload;
@@ -13,7 +14,7 @@ use std::num::NonZeroUsize;
 use std::time::Duration;
 
 #[test]
-fn subscription_config_contains_exactly_three_ordered_signal_ids() {
+fn subscription_config_contains_exactly_five_ordered_signal_ids() {
     let config = subscription_config();
     assert_eq!(config.client_id.unwrap().id, CLIENT_ID);
     let ids = config.signals.unwrap().signal_id;
@@ -32,6 +33,8 @@ fn subscription_config_contains_exactly_three_ordered_signal_ids() {
             (HAZARD_NAMESPACE, HAZARD_NAME),
             (TURN_NAMESPACE, LEFT_TURN_NAME),
             (TURN_NAMESPACE, RIGHT_TURN_NAME),
+            (FLCM_NAMESPACE, LEFT_LOW_BEAM_STATUS_NAME),
+            (FLCM_NAMESPACE, RIGHT_LOW_BEAM_STATUS_NAME),
         ]
     );
     assert!(!config.on_change);
@@ -44,13 +47,27 @@ fn subscription_config_rejects_hello_world_signal_widening() {
     let ids = config.signals.unwrap().signal_id;
     assert_eq!(
         ids.len(),
-        3,
-        "Phase III must not subscribe extra Hello World signals"
+        5,
+        "Phase IV must subscribe hazard, turns, and the two FLCM status signals only"
     );
-    // Explicitly assert absence of common Hello World distractors by name.
+    let identities: Vec<(&str, &str)> = ids
+        .iter()
+        .map(|id| {
+            (
+                id.namespace.as_ref().unwrap().name.as_str(),
+                id.name.as_str(),
+            )
+        })
+        .collect();
+    assert!(
+        identities.contains(&(FLCM_NAMESPACE, LEFT_LOW_BEAM_STATUS_NAME))
+            && identities.contains(&(FLCM_NAMESPACE, RIGHT_LOW_BEAM_STATUS_NAME)),
+        "FLCM status identities must be subscribed: {identities:?}"
+    );
+    // Reject unlisted Hello World distractors; LowBeamLightStatus is allowed.
     let names: Vec<&str> = ids.iter().map(|id| id.name.as_str()).collect();
     for distractor in [
-        "LowBeam",
+        "LowBeamLightControl",
         "HighBeam",
         "Brake",
         "TurnStalk",
@@ -71,7 +88,9 @@ fn subscription_ready_status_proves_connection_and_exact_target() {
         "[remotive_bridge] connected; subscribed signals=\
 SCCM-DriverCan0:HazardLightButton.HazardLightButton,\
 BCM-BodyCan0:TurnLightControl.LeftTurnLightRequest,\
-BCM-BodyCan0:TurnLightControl.RightTurnLightRequest"
+BCM-BodyCan0:TurnLightControl.RightTurnLightRequest,\
+FLCM-BodyCan0:LowBeamLightStatus.LeftLowBeamLightStatus,\
+FLCM-BodyCan0:LowBeamLightStatus.RightLowBeamLightStatus"
     );
 }
 
@@ -101,6 +120,37 @@ fn decoder_accepts_only_documented_boolean_encodings() {
     ];
     for payload in malformed {
         assert_eq!(decode_boolean(payload.as_ref()), None);
+    }
+}
+
+#[test]
+fn decoder_maps_dbc_ok_fail_integers_and_named_values() {
+    for (payload, expected) in [
+        (Payload::Integer(0), true),
+        (Payload::Integer(1), false),
+        (Payload::Uinteger64(0), true),
+        (Payload::Uinteger64(1), false),
+        (Payload::StrValue("Ok".into()), true),
+        (Payload::StrValue("Fail".into()), false),
+    ] {
+        assert_eq!(decode_ok_fail(Some(&payload)), Some(expected));
+    }
+
+    let malformed = [
+        None,
+        Some(Payload::Empty(true)),
+        Some(Payload::Double(1.0)),
+        Some(Payload::Arbitration(true)),
+        Some(Payload::Integer(-1)),
+        Some(Payload::Integer(2)),
+        Some(Payload::Uinteger64(2)),
+        Some(Payload::StrValue("On".into())),
+        Some(Payload::StrValue("Off".into())),
+        Some(Payload::StrValue("ok".into())),
+        Some(Payload::StrValue("fail".into())),
+    ];
+    for payload in malformed {
+        assert_eq!(decode_ok_fail(payload.as_ref()), None);
     }
 }
 
@@ -207,6 +257,65 @@ fn values_from_separate_batches_remain_independent() {
         decode_observation_signals(&right, &mut rejected),
         vec![BrokerObservation::RightTurnRequest(true)]
     );
+}
+
+#[test]
+fn flcm_status_maps_dbc_zero_to_ok_true_and_one_to_fail_false() {
+    let batch = Signals {
+        signal: vec![
+            signal(
+                Some(FLCM_NAMESPACE),
+                LEFT_LOW_BEAM_STATUS_NAME,
+                Some(Payload::Integer(0)),
+            ),
+            signal(
+                Some(FLCM_NAMESPACE),
+                RIGHT_LOW_BEAM_STATUS_NAME,
+                Some(Payload::Integer(1)),
+            ),
+        ],
+    };
+    let mut rejected = ObservationRejectCounters::default();
+
+    assert_eq!(
+        decode_observation_signals(&batch, &mut rejected),
+        vec![
+            BrokerObservation::LeftLowBeamStatus(true),
+            BrokerObservation::RightLowBeamStatus(false),
+        ]
+    );
+    assert_eq!(rejected.wrong_identity(), 0);
+    assert_eq!(rejected.invalid_payload(), 0);
+}
+
+#[test]
+fn flcm_status_left_and_right_batches_are_valid_independently() {
+    let left_ok = Signals {
+        signal: vec![signal(
+            Some(FLCM_NAMESPACE),
+            LEFT_LOW_BEAM_STATUS_NAME,
+            Some(Payload::Uinteger64(0)),
+        )],
+    };
+    let right_fail = Signals {
+        signal: vec![signal(
+            Some(FLCM_NAMESPACE),
+            RIGHT_LOW_BEAM_STATUS_NAME,
+            Some(Payload::StrValue("Fail".into())),
+        )],
+    };
+    let mut rejected = ObservationRejectCounters::default();
+
+    assert_eq!(
+        decode_observation_signals(&left_ok, &mut rejected),
+        vec![BrokerObservation::LeftLowBeamStatus(true)]
+    );
+    assert_eq!(
+        decode_observation_signals(&right_fail, &mut rejected),
+        vec![BrokerObservation::RightLowBeamStatus(false)]
+    );
+    assert_eq!(rejected.wrong_identity(), 0);
+    assert_eq!(rejected.invalid_payload(), 0);
 }
 
 #[test]

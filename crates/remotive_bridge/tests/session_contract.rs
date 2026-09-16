@@ -6,7 +6,7 @@ use remotive_bridge::session::{SessionConfig, run_connected_session, run_session
 use remotive_bridge::source::{
     BrokerObservation, ObservationConnector, ObservationSource, RpmSource, ShutdownSource,
 };
-use socketcan::CanFrame;
+use socketcan::{CanFrame, EmbeddedFrame, Frame};
 use std::collections::VecDeque;
 use std::future::pending;
 use std::num::NonZeroUsize;
@@ -275,6 +275,55 @@ async fn observations_emit_independent_strict_can_frames_in_source_order() {
             ObservedEcuSignal::LeftTurnRequest(true),
             ObservedEcuSignal::RightTurnRequest(false),
         ]
+    );
+    assert_controlled_edges(&sink.frames);
+}
+
+#[tokio::test]
+async fn flcm_status_observations_write_independent_108_and_109_frames() {
+    let mut sink = RecordingSink::default();
+    let mut observations = FakeObservations(VecDeque::from([
+        Ok(BrokerObservation::LeftLowBeamStatus(true)),
+        Ok(BrokerObservation::RightLowBeamStatus(false)),
+        Ok(BrokerObservation::End),
+    ]));
+    let mut rpm = FakeRpm(VecDeque::new());
+    let mut shutdown = PendingShutdown;
+
+    let error = run_session(
+        &mut sink,
+        &mut observations,
+        &mut rpm,
+        &mut shutdown,
+        SessionConfig::default(),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error.to_string().contains("broker stream ended"));
+    let observed: Vec<_> = sink
+        .frames
+        .iter()
+        .filter_map(ObservedEcuSignal::from_can_frame)
+        .collect();
+    assert_eq!(
+        observed,
+        [
+            ObservedEcuSignal::LeftLowBeamStatus(true),
+            ObservedEcuSignal::RightLowBeamStatus(false),
+        ]
+    );
+    assert_eq!(observed[0].to_can_frame().unwrap().raw_id(), 0x108);
+    assert_eq!(observed[1].to_can_frame().unwrap().raw_id(), 0x109);
+    assert_eq!(
+        observed[0].to_can_frame().unwrap().data(),
+        [1, 0],
+        "Ok must encode as [1,0] on 0x108"
+    );
+    assert_eq!(
+        observed[1].to_can_frame().unwrap().data(),
+        [0, 0],
+        "Fail must encode as [0,0] on 0x109"
     );
     assert_controlled_edges(&sink.frames);
 }

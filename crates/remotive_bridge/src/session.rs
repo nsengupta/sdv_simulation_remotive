@@ -72,6 +72,14 @@ where
                     sink.write_frame(ObservedEcuSignal::RightTurnRequest(value).to_can_frame()?)
                         .map_err(|error| anyhow!("write right-turn observation frame: {error}"))?;
                 }
+                Ok(BrokerObservation::LeftLowBeamStatus(value)) => {
+                    sink.write_frame(ObservedEcuSignal::LeftLowBeamStatus(value).to_can_frame()?)
+                        .map_err(|error| anyhow!("write left low-beam status frame: {error}"))?;
+                }
+                Ok(BrokerObservation::RightLowBeamStatus(value)) => {
+                    sink.write_frame(ObservedEcuSignal::RightLowBeamStatus(value).to_can_frame()?)
+                        .map_err(|error| anyhow!("write right low-beam status frame: {error}"))?;
+                }
                 Ok(BrokerObservation::End) => break Some(anyhow!("broker stream ended")),
                 Err(error) => break Some(error.context("broker stream failed")),
             },
