@@ -69,3 +69,14 @@
 - `cargo test -p common`: 293 unit + 10 FLCM integration tests passed.
 - `cargo check --workspace --all-targets`: passed with one pre-existing TUI unused-import warning.
 - `git diff --check`: passed.
+
+## Important Finding Fix — Power-Off Race
+
+- `VirtualCarActor` now rejects spontaneous FLCM watchdog replies while `PreparingToStop`
+  or `Off`, preventing an already-queued timer completion from restoring `silent=true`
+  after the lifecycle reset or emitting `FlcmLampFault` while unpowered.
+- Added `runtime_ignores_queued_flcm_silence_completion_after_power_off`, which powers off,
+  injects the late watchdog reply, and verifies both the reset FLCM context and diagnostic silence.
+- RED: the focused test failed because the late reply changed `silent` from `false` to `true`.
+- GREEN: `cargo test -p common --test flcm_observation_contract` passed all 11 tests.
+- `git diff --check`: passed.

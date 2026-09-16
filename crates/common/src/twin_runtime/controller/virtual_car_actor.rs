@@ -636,6 +636,16 @@ impl VirtualCarActor {
         assembly_id: AssemblyId,
         event: crate::digital_twin::ZoneSpontaneousEvent,
     ) -> Result<(), ActorProcessingErr> {
+        if matches!(
+            event,
+            crate::digital_twin::ZoneSpontaneousEvent::Flcm { .. }
+        ) && matches!(
+            runtime_state.twin_car.current_state(),
+            FsmState::Off | FsmState::PreparingToStop(_)
+        ) {
+            return Ok(());
+        }
+
         let (ingress, reply) = match event {
             crate::digital_twin::ZoneSpontaneousEvent::Headlamp {
                 direction,

@@ -2,12 +2,16 @@
 
 use std::time::Duration;
 
-use common::fsm::FsmState;
+use common::digital_twin::ZoneSpontaneousEvent;
+use common::fsm::{AssemblyId, FsmState};
 use common::observation_records::diagnostic::{DiagnosticKind, DiagnosticLevel, DiagnosticRecord};
 use common::observation_records::transition::SessionClock;
-use common::vehicle_state::{FlcmContext, FlcmMessage, ObservationDisposition, ObservedBool};
+use common::vehicle_state::{
+    FlcmContext, FlcmMessage, FlcmZoneReply, ObservationDisposition, ObservedBool,
+};
 use common::{
-    ObservedEcuSignal, TwinIngressEvent, VehicleController, VehicleControllerRuntimeOptions,
+    ObservedEcuSignal, TwinIngressEvent, TwinMessage, VehicleController,
+    VehicleControllerRuntimeOptions,
 };
 
 #[test]
@@ -297,6 +301,72 @@ async fn runtime_warns_once_after_500ms_silence_and_clears_on_healthy_traffic() 
             right_fail: false
         }
     ));
+
+    controller.get_actor_ref().stop(None);
+    handle.await.expect("controller task");
+}
+
+#[tokio::test]
+async fn runtime_ignores_queued_flcm_silence_completion_after_power_off() {
+    let (diagnostic_tx, mut diagnostic_rx) = tokio::sync::mpsc::unbounded_channel();
+    let options = VehicleControllerRuntimeOptions {
+        diagnostic_tx: Some(diagnostic_tx),
+        ..Default::default()
+    };
+    let (controller, handle) =
+        VehicleController::install_and_start_with_options("FLCM-POWER-OFF-RACE".into(), options)
+            .await
+            .expect("install controller");
+    assert_eq!(
+        diagnostic_rx.recv().await.expect("boot diagnostic").kind,
+        DiagnosticKind::Boot
+    );
+
+    controller.send_power_on().await.expect("power on");
+    wait_for_idle(&controller).await;
+    controller.send_power_off().await.expect("power off");
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        if controller
+            .get_snapshot(Some(Duration::from_millis(50)))
+            .await
+            .is_ok_and(|snapshot| *snapshot.current_state() == FsmState::Off)
+        {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "power-off timeout");
+        tokio::task::yield_now().await;
+    }
+
+    controller
+        .get_actor_ref()
+        .send_message(TwinMessage::ZoneSpontaneous {
+            zone_id: AssemblyId::Flcm,
+            event: ZoneSpontaneousEvent::Flcm {
+                reply: FlcmZoneReply {
+                    ctx: FlcmContext {
+                        silent: true,
+                        ..Default::default()
+                    },
+                    disposition: ObservationDisposition::Lifecycle,
+                },
+            },
+        })
+        .expect("inject queued silence completion");
+
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    let snapshot = controller
+        .get_snapshot(Some(Duration::from_millis(250)))
+        .await
+        .expect("snapshot after queued completion");
+    assert_eq!(*snapshot.current_state(), FsmState::Off);
+    assert_eq!(snapshot.context().flcm, FlcmContext::default());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), diagnostic_rx.recv())
+            .await
+            .is_err(),
+        "queued silence completion emitted a diagnostic while unpowered"
+    );
 
     controller.get_actor_ref().stop(None);
     handle.await.expect("controller task");
