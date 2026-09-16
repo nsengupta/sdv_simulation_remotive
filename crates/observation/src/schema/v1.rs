@@ -262,6 +262,13 @@ pub enum FsmEventV1 {
     RightTurnRequestObserved {
         pressed: bool,
     },
+    /// FLCM low-beam status observation (schema v8). `ok = true` is DBC `Ok`.
+    LeftLowBeamStatusObserved {
+        ok: bool,
+    },
+    RightLowBeamStatusObserved {
+        ok: bool,
+    },
     UpdateAmbientLux {
         lux: u16,
     },
@@ -748,6 +755,12 @@ fn project_fsm_event(event: &PublishedFsmEvent) -> FsmEventV1 {
         PublishedFsmEvent::RightTurnRequestObserved(pressed) => {
             FsmEventV1::RightTurnRequestObserved { pressed: *pressed }
         }
+        PublishedFsmEvent::LeftLowBeamStatusObserved(ok) => {
+            FsmEventV1::LeftLowBeamStatusObserved { ok: *ok }
+        }
+        PublishedFsmEvent::RightLowBeamStatusObserved(ok) => {
+            FsmEventV1::RightLowBeamStatusObserved { ok: *ok }
+        }
         PublishedFsmEvent::UpdateAmbientLux(lux) => FsmEventV1::UpdateAmbientLux { lux: *lux },
         PublishedFsmEvent::FrontHeadlampOnAck => FsmEventV1::FrontHeadlampOnAck,
         PublishedFsmEvent::FrontHeadlampOffAck => FsmEventV1::FrontHeadlampOffAck,
@@ -1031,6 +1044,12 @@ fn live_fsm_event(event: &FsmEventV1) -> PublishedFsmEvent {
         }
         FsmEventV1::RightTurnRequestObserved { pressed } => {
             PublishedFsmEvent::RightTurnRequestObserved(*pressed)
+        }
+        FsmEventV1::LeftLowBeamStatusObserved { ok } => {
+            PublishedFsmEvent::LeftLowBeamStatusObserved(*ok)
+        }
+        FsmEventV1::RightLowBeamStatusObserved { ok } => {
+            PublishedFsmEvent::RightLowBeamStatusObserved(*ok)
         }
         FsmEventV1::UpdateAmbientLux { lux } => PublishedFsmEvent::UpdateAmbientLux(*lux),
         FsmEventV1::FrontHeadlampOnAck => PublishedFsmEvent::FrontHeadlampOnAck,

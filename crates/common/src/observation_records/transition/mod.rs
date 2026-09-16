@@ -201,6 +201,10 @@ pub enum PublishedFsmEvent {
     HazardButtonObserved(bool),
     LeftTurnRequestObserved(bool),
     RightTurnRequestObserved(bool),
+    /// FLCM low-beam status observation. `true` = Ok, `false` = Fail (DBC polarity is
+    /// inverted in the bridge decoder, not here).
+    LeftLowBeamStatusObserved(bool),
+    RightLowBeamStatusObserved(bool),
     UpdateAmbientLux(u16),
     FrontHeadlampOnAck,
     FrontHeadlampOffAck,
@@ -224,6 +228,8 @@ impl From<&FsmEvent> for PublishedFsmEvent {
             FsmEvent::HazardButtonObserved(pressed) => Self::HazardButtonObserved(*pressed),
             FsmEvent::LeftTurnRequestObserved(pressed) => Self::LeftTurnRequestObserved(*pressed),
             FsmEvent::RightTurnRequestObserved(pressed) => Self::RightTurnRequestObserved(*pressed),
+            FsmEvent::LeftLowBeamStatusObserved(ok) => Self::LeftLowBeamStatusObserved(*ok),
+            FsmEvent::RightLowBeamStatusObserved(ok) => Self::RightLowBeamStatusObserved(*ok),
             FsmEvent::UpdateAmbientLux(lux) => Self::UpdateAmbientLux(*lux),
             FsmEvent::FrontHeadlampOnAck => Self::FrontHeadlampOnAck,
             FsmEvent::FrontHeadlampOffAck => Self::FrontHeadlampOffAck,
@@ -237,11 +243,9 @@ impl From<&FsmEvent> for PublishedFsmEvent {
             FsmEvent::Internal(op) => Self::Internal(op.into()),
             FsmEvent::RainsStarted => Self::RainsStarted,
             FsmEvent::RainsStopped => Self::RainsStopped,
-            // Task 4 adds these events to the published schema. Keep v1 unchanged for now.
-            FsmEvent::LeftLowBeamStatusObserved(_) | FsmEvent::RightLowBeamStatusObserved(_) => {
-                Self::TimerTick
-            }
             // AssemblyZoneReady remains unpublished; map to TimerTick as a neutral placeholder.
+            // The FLCM silence verdict rides this hop, so its ledger row is identified by
+            // `flcm.silent` in the published context rather than by the event label.
             FsmEvent::AssemblyZoneReady(_) => Self::TimerTick,
         }
     }

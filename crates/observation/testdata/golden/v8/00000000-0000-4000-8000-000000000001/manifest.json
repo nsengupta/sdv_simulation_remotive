@@ -1,0 +1,20 @@
+{
+  "schema_version": 8,
+  "run_id": "00000000-0000-4000-8000-000000000001",
+  "created_at": {
+    "unix_seconds": 1784260800,
+    "nanosecond": 0
+  },
+  "session_started_at": {
+    "unix_seconds": 1784260800,
+    "nanosecond": 0
+  },
+  "vehicle": {
+    "identity": "test-vehicle"
+  },
+  "scenario": null,
+  "streams": {
+    "diagnostic": "diagnostic.jsonl",
+    "ledger": "ledger.jsonl"
+  }
+}

@@ -581,8 +581,10 @@ async fn observed_flcm_ok_and_fail_cross_gateway_twin_ledger_and_warning() {
 
     submit_observed(&controller, ObservedEcuSignal::LeftLowBeamStatus(true)).await;
     let left_ok = recv_row(&mut transition_rx).await;
-    // Published schema still maps FLCM observations to TimerTick (v7 context carries the facts).
-    assert_eq!(left_ok.event, PublishedFsmEvent::TimerTick);
+    assert_eq!(
+        left_ok.event,
+        PublishedFsmEvent::LeftLowBeamStatusObserved(true)
+    );
     assert_flcm_ctx(
         &left_ok,
         PublishedObservedBool::On,
@@ -596,7 +598,10 @@ async fn observed_flcm_ok_and_fail_cross_gateway_twin_ledger_and_warning() {
 
     submit_observed(&controller, ObservedEcuSignal::RightLowBeamStatus(true)).await;
     let right_ok = recv_row(&mut transition_rx).await;
-    assert_eq!(right_ok.event, PublishedFsmEvent::TimerTick);
+    assert_eq!(
+        right_ok.event,
+        PublishedFsmEvent::RightLowBeamStatusObserved(true)
+    );
     assert_flcm_ctx(
         &right_ok,
         PublishedObservedBool::On,
@@ -627,7 +632,10 @@ async fn observed_flcm_ok_and_fail_cross_gateway_twin_ledger_and_warning() {
 
     submit_observed(&controller, ObservedEcuSignal::LeftLowBeamStatus(false)).await;
     let left_fail = recv_row(&mut transition_rx).await;
-    assert_eq!(left_fail.event, PublishedFsmEvent::TimerTick);
+    assert_eq!(
+        left_fail.event,
+        PublishedFsmEvent::LeftLowBeamStatusObserved(false)
+    );
     assert_flcm_ctx(
         &left_fail,
         PublishedObservedBool::Off,
@@ -774,5 +782,55 @@ async fn observed_flcm_silence_sets_silent_flag_and_warning() {
     assert_eq!(
         snapshot.context().flcm.right_low_beam_status,
         ObservedBool::On
+    );
+}
+
+/// Phase I/II/III topologies and emulator-only runs publish no FLCM status at all. Power-on
+/// alone must not arm the watchdog, so those runs stay silent-free and ledger-quiet.
+#[tokio::test]
+async fn power_on_without_flcm_traffic_never_warns_or_writes_a_silent_row() {
+    let (transition_tx, mut transition_rx) = mpsc::channel(32);
+    let (diagnostic_tx, mut diagnostic_rx) = mpsc::unbounded_channel();
+    let runtime_options = VehicleControllerRuntimeOptions {
+        assembly_topology: AssemblyTopology::PhaseI,
+        transition_tx: Some(transition_tx),
+        diagnostic_tx: Some(diagnostic_tx),
+        ..Default::default()
+    };
+    let (controller, _join) = VehicleController::install_and_start_with_options(
+        "E2E-PHASE-IV-FLCM-NEVER-OBSERVED-01".into(),
+        runtime_options,
+    )
+    .await
+    .expect("controller start");
+
+    let boot = recv_diagnostic(&mut diagnostic_rx).await;
+    assert_eq!(boot.kind, DiagnosticKind::Boot);
+
+    power_on_and_drain_startup(&controller, &mut transition_rx).await;
+
+    tokio::time::sleep(Duration::from_millis(700)).await;
+
+    assert!(
+        transition_rx.try_recv().is_err(),
+        "a run without FLCM traffic must not write a silence ledger row"
+    );
+    assert!(
+        diagnostic_rx.try_recv().is_err(),
+        "a run without FLCM traffic must not emit FlcmLampFault"
+    );
+
+    let snapshot = controller
+        .get_snapshot(Some(Duration::from_millis(300)))
+        .await
+        .expect("quiet snapshot");
+    assert!(!snapshot.context().flcm.silent);
+    assert_eq!(
+        snapshot.context().flcm.left_low_beam_status,
+        ObservedBool::Unknown
+    );
+    assert_eq!(
+        snapshot.context().flcm.right_low_beam_status,
+        ObservedBool::Unknown
     );
 }

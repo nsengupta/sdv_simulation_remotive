@@ -11,8 +11,8 @@ use observation::schema::v1::{
 };
 
 #[test]
-fn current_schema_version_is_v7() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 7);
+fn current_schema_version_is_v8() {
+    assert_eq!(CURRENT_SCHEMA_VERSION, 8);
 }
 
 #[test]
@@ -22,13 +22,13 @@ fn v5_sccm_json_without_hazard_mode_defaults_off() {
 }
 
 #[test]
-fn v7_initial_observed_values_serialize_as_unknown() {
+fn v8_initial_observed_values_serialize_as_unknown() {
     let metadata = support::fixed_run_metadata();
     let live = support::sample_ledger();
     let envelope = ledger_envelope(&metadata, &live).expect("sample ledger projection");
-    let json = serde_json::to_value(&envelope).expect("serialize v5 envelope");
+    let json = serde_json::to_value(&envelope).expect("serialize v8 envelope");
 
-    assert_eq!(json["schema_version"], 7);
+    assert_eq!(json["schema_version"], 8);
     assert_eq!(
         json["payload"]["old_ctx"]["sccm"]["hazard_button_on"],
         "unknown"
@@ -99,6 +99,14 @@ fn observed_events_round_trip_losslessly() {
             PublishedFsmEvent::RightTurnRequestObserved(false),
             FsmEventV1::RightTurnRequestObserved { pressed: false },
         ),
+        (
+            PublishedFsmEvent::LeftLowBeamStatusObserved(true),
+            FsmEventV1::LeftLowBeamStatusObserved { ok: true },
+        ),
+        (
+            PublishedFsmEvent::RightLowBeamStatusObserved(false),
+            FsmEventV1::RightLowBeamStatusObserved { ok: false },
+        ),
     ];
 
     for (live_event, expected_dto) in cases {
@@ -109,7 +117,7 @@ fn observed_events_round_trip_losslessly() {
         live.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::Off;
 
         let envelope = ledger_envelope(&metadata, &live).expect("observed ledger projection");
-        assert_eq!(envelope.schema_version, 7);
+        assert_eq!(envelope.schema_version, 8);
         assert_eq!(envelope.payload.event, expected_dto);
         assert_eq!(
             envelope.payload.current_ctx.sccm.hazard_button_on,

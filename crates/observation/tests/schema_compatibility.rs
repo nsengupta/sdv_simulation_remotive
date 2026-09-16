@@ -62,8 +62,8 @@ fn pre_phase_i_v3_run_reads_with_defaulted_sccm_and_bcm_contexts() {
 }
 
 #[test]
-fn current_schema_version_is_v7() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 7);
+fn current_schema_version_is_v8() {
+    assert_eq!(CURRENT_SCHEMA_VERSION, 8);
 }
 
 /// Write a fresh, valid fixture (two diagnostics, one ledger row) under `parent` and return the
@@ -80,13 +80,13 @@ fn write_fixture(parent: &Path) -> PathBuf {
 }
 
 #[test]
-fn new_writer_emits_schema_v7_manifest_and_rows() {
+fn new_writer_emits_schema_v8_manifest_and_rows() {
     let temp = tempfile::tempdir().unwrap();
     let run_dir = write_fixture(temp.path());
     let manifest: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(run_dir.join("manifest.json")).unwrap())
             .unwrap();
-    assert_eq!(manifest["schema_version"], 7);
+    assert_eq!(manifest["schema_version"], 8);
 
     for stream in ["diagnostic.jsonl", "ledger.jsonl"] {
         let row: serde_json::Value = serde_json::from_str(
@@ -97,7 +97,7 @@ fn new_writer_emits_schema_v7_manifest_and_rows() {
                 .unwrap(),
         )
         .unwrap();
-        assert_eq!(row["schema_version"], 7, "{stream}");
+        assert_eq!(row["schema_version"], 8, "{stream}");
     }
 }
 
@@ -184,6 +184,56 @@ fn v6_golden_without_flcm_defaults_to_unknown_and_not_silent() {
         );
         assert!(!context.flcm.silent);
     }
+}
+
+#[test]
+fn v7_golden_with_flcm_context_still_reads() {
+    let run_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("testdata/golden/v7")
+        .join(RUN_ID);
+    let reader = RunReader::open(&run_dir).expect("schema-v7 golden must remain supported");
+    let envelope = reader
+        .ledger()
+        .unwrap()
+        .next()
+        .unwrap()
+        .expect("schema-v7 ledger must deserialize");
+
+    assert_eq!(envelope.schema_version, 7);
+    for context in [&envelope.payload.old_ctx, &envelope.payload.current_ctx] {
+        assert_eq!(
+            context.flcm.left_low_beam_status_ok,
+            ObservedBoolV1::Unknown
+        );
+        assert_eq!(
+            context.flcm.right_low_beam_status_ok,
+            ObservedBoolV1::Unknown
+        );
+        assert!(!context.flcm.silent);
+    }
+    reader
+        .load()
+        .expect("schema-v7 golden must load end to end");
+}
+
+/// v8 exists because the two FLCM observation event tags are unreadable to a v7 reader.
+#[test]
+fn v8_flcm_observation_events_are_readable_and_were_not_valid_before_v8() {
+    let left: FsmEventV1 =
+        serde_json::from_str(r#"{"type":"left_low_beam_status_observed","ok":true}"#)
+            .expect("v8 LeftLowBeamStatusObserved");
+    assert_eq!(left, FsmEventV1::LeftLowBeamStatusObserved { ok: true });
+
+    let right: FsmEventV1 =
+        serde_json::from_str(r#"{"type":"right_low_beam_status_observed","ok":false}"#)
+            .expect("v8 RightLowBeamStatusObserved");
+    assert_eq!(right, FsmEventV1::RightLowBeamStatusObserved { ok: false });
+
+    assert!(
+        serde_json::from_str::<FsmEventV1>(r#"{"type":"low_beam_status_observed","ok":true}"#)
+            .is_err(),
+        "unknown event tags must stay rejected"
+    );
 }
 
 #[test]
@@ -276,24 +326,24 @@ fn overwrite_jsonl_line(path: &Path, line_number: usize, replacement: &str) {
 }
 
 #[test]
-fn unsupported_v8_manifest_is_rejected_clearly() {
+fn unsupported_v9_manifest_is_rejected_clearly() {
     let temp = tempfile::tempdir().unwrap();
     let run_dir = write_fixture(temp.path());
     mutate_json_file(&run_dir.join("manifest.json"), |value| {
-        value["schema_version"] = serde_json::json!(8);
+        value["schema_version"] = serde_json::json!(9);
     });
 
     let error = RunReader::open(&run_dir).unwrap_err();
     match error {
         ObservationError::UnsupportedSchema { found, supported } => {
-            assert_eq!(found, 8);
-            assert_eq!(supported, 7);
+            assert_eq!(found, 9);
+            assert_eq!(supported, 8);
         }
         other => panic!("expected UnsupportedSchema, got {other:?}"),
     }
     assert!(
-        error.to_string().contains('8') && error.to_string().contains('7'),
-        "unsupported v8 must name the found and supported versions: {error}"
+        error.to_string().contains('9') && error.to_string().contains('8'),
+        "unsupported v9 must name the found and supported versions: {error}"
     );
 }
 
@@ -328,7 +378,7 @@ fn diagnostic_row_schema_version_mismatch_is_rejected() {
     let error = reader.diagnostics().unwrap().next().unwrap().unwrap_err();
     match error {
         ObservationError::SchemaVersionMismatch { manifest, row } => {
-            assert_eq!(manifest, 7);
+            assert_eq!(manifest, 8);
             assert_eq!(row, 3);
         }
         other => panic!("expected SchemaVersionMismatch, got {other:?}"),
