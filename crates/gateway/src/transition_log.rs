@@ -123,8 +123,8 @@ mod ansi {
 mod tests {
     use super::*;
     use common::facade::{
-        PublishedBcmContext, PublishedBcmState, PublishedDomainAction, PublishedFsmEvent,
-        PublishedFsmState, PublishedHeadlampContext, PublishedHeadlampState,
+        PublishedBcmContext, PublishedBcmState, PublishedDomainAction, PublishedFlcmContext,
+        PublishedFsmEvent, PublishedFsmState, PublishedHeadlampContext, PublishedHeadlampState,
         PublishedHealthContext, PublishedObservedBool, PublishedPowertrainContext,
         PublishedSccmContext, PublishedTransitionRecord, PublishedVehicleContext,
         PublishedVisibilityContext, PublishedWeatherContext, PublishedWheelRpm,
@@ -158,6 +158,7 @@ mod tests {
                 left_turn_request_on: PublishedObservedBool::Unknown,
                 right_turn_request_on: PublishedObservedBool::Unknown,
             },
+            flcm: PublishedFlcmContext::default(),
             powertrain: PublishedPowertrainContext {
                 wheel_rpm: PublishedWheelRpm {
                     front_left: 0,

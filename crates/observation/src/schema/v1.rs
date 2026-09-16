@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use common::facade::{
     DiagnosticKind, DiagnosticLevel, DiagnosticRecord, PublishedBcmContext, PublishedBcmState,
-    PublishedDomainAction, PublishedFrontHeadlampIncompleteCause,
+    PublishedDomainAction, PublishedFlcmContext, PublishedFrontHeadlampIncompleteCause,
     PublishedFrontHeadlampSwitchDirection, PublishedFsmEvent, PublishedFsmState,
     PublishedHeadlampContext, PublishedHeadlampState, PublishedHealthContext,
     PublishedObservedBool, PublishedOperational, PublishedPowertrainContext, PublishedSccmContext,
@@ -347,6 +347,11 @@ pub enum DiagnosticKindV1 {
     WiperMotionChanged {
         wiping: bool,
     },
+    FlcmLampFault {
+        silent: bool,
+        left_fail: bool,
+        right_fail: bool,
+    },
     ActuationFailure {
         action: String,
         error: String,
@@ -527,6 +532,30 @@ pub struct BcmContextV1 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlcmContextV1 {
+    #[serde(default = "unknown_observed_bool")]
+    pub left_low_beam_status_ok: ObservedBoolV1,
+    #[serde(default = "unknown_observed_bool")]
+    pub right_low_beam_status_ok: ObservedBoolV1,
+    #[serde(default)]
+    pub silent: bool,
+}
+
+fn unknown_observed_bool() -> ObservedBoolV1 {
+    ObservedBoolV1::Unknown
+}
+
+impl Default for FlcmContextV1 {
+    fn default() -> Self {
+        Self {
+            left_low_beam_status_ok: ObservedBoolV1::Unknown,
+            right_low_beam_status_ok: ObservedBoolV1::Unknown,
+            silent: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HeadlampStateV1 {
     Off,
@@ -548,6 +577,8 @@ pub struct VehicleContextV1 {
     pub sccm: SccmContextV1,
     #[serde(default)]
     pub bcm: BcmContextV1,
+    #[serde(default)]
+    pub flcm: FlcmContextV1,
     pub powertrain: PowertrainContextV1,
     pub health: HealthContextV1,
     pub visibility: VisibilityContextV1,
@@ -661,15 +692,14 @@ fn project_diagnostic_kind(kind: &DiagnosticKind) -> DiagnosticKindV1 {
         DiagnosticKind::WiperMotionChanged { wiping } => {
             DiagnosticKindV1::WiperMotionChanged { wiping: *wiping }
         }
-        // Task 4 gives FLCM facts their own wire variant. Preserve v1 compatibility meanwhile.
         DiagnosticKind::FlcmLampFault {
             silent,
             left_fail,
             right_fail,
-        } => DiagnosticKindV1::Text {
-            text: format!(
-                "flcm lamp fault silent={silent} left_fail={left_fail} right_fail={right_fail}"
-            ),
+        } => DiagnosticKindV1::FlcmLampFault {
+            silent: *silent,
+            left_fail: *left_fail,
+            right_fail: *right_fail,
         },
         DiagnosticKind::ActuationFailure { action, error } => DiagnosticKindV1::ActuationFailure {
             action: action.clone(),
@@ -783,6 +813,11 @@ fn project_vehicle_context(ctx: &PublishedVehicleContext) -> VehicleContextV1 {
             state: project_bcm_state(ctx.bcm.state),
             left_turn_request_on: ctx.bcm.left_turn_request_on.into(),
             right_turn_request_on: ctx.bcm.right_turn_request_on.into(),
+        },
+        flcm: FlcmContextV1 {
+            left_low_beam_status_ok: ctx.flcm.left_low_beam_status_ok.into(),
+            right_low_beam_status_ok: ctx.flcm.right_low_beam_status_ok.into(),
+            silent: ctx.flcm.silent,
         },
         powertrain: project_powertrain_context(&ctx.powertrain),
         health: project_health_context(&ctx.health),
@@ -953,6 +988,15 @@ fn live_diagnostic_kind(kind: &DiagnosticKindV1) -> Result<DiagnosticKind, Obser
         DiagnosticKindV1::WiperMotionChanged { wiping } => {
             DiagnosticKind::WiperMotionChanged { wiping: *wiping }
         }
+        DiagnosticKindV1::FlcmLampFault {
+            silent,
+            left_fail,
+            right_fail,
+        } => DiagnosticKind::FlcmLampFault {
+            silent: *silent,
+            left_fail: *left_fail,
+            right_fail: *right_fail,
+        },
         DiagnosticKindV1::ActuationFailure { action, error } => DiagnosticKind::ActuationFailure {
             action: action.clone(),
             error: error.clone(),
@@ -1053,6 +1097,11 @@ fn live_vehicle_context(ctx: &VehicleContextV1) -> PublishedVehicleContext {
             state: live_bcm_state(ctx.bcm.state),
             left_turn_request_on: ctx.bcm.left_turn_request_on.into(),
             right_turn_request_on: ctx.bcm.right_turn_request_on.into(),
+        },
+        flcm: PublishedFlcmContext {
+            left_low_beam_status_ok: ctx.flcm.left_low_beam_status_ok.into(),
+            right_low_beam_status_ok: ctx.flcm.right_low_beam_status_ok.into(),
+            silent: ctx.flcm.silent,
         },
         powertrain: PublishedPowertrainContext {
             wheel_rpm: PublishedWheelRpm {

@@ -46,7 +46,7 @@ pub use observation_records::transition::sink::{
 };
 pub use observation_records::{
     DiagnosticKind, DiagnosticLevel, DiagnosticRecord, PublishedBcmContext, PublishedBcmState,
-    PublishedDomainAction, PublishedFrontHeadlampIncompleteCause,
+    PublishedDomainAction, PublishedFlcmContext, PublishedFrontHeadlampIncompleteCause,
     PublishedFrontHeadlampSwitchDirection, PublishedFsmEvent, PublishedFsmState,
     PublishedHeadlampContext, PublishedHeadlampState, PublishedHealthContext,
     PublishedObservedBool, PublishedPowertrainContext, PublishedSccmContext,

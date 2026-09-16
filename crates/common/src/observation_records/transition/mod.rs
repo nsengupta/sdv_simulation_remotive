@@ -469,6 +469,23 @@ impl From<&crate::vehicle_state::BcmContext> for PublishedBcmContext {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublishedFlcmContext {
+    pub left_low_beam_status_ok: PublishedObservedBool,
+    pub right_low_beam_status_ok: PublishedObservedBool,
+    pub silent: bool,
+}
+
+impl From<&crate::vehicle_state::FlcmContext> for PublishedFlcmContext {
+    fn from(flcm: &crate::vehicle_state::FlcmContext) -> Self {
+        Self {
+            left_low_beam_status_ok: flcm.left_low_beam_status.into(),
+            right_low_beam_status_ok: flcm.right_low_beam_status.into(),
+            silent: flcm.silent,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PublishedHeadlampContext {
     pub state: PublishedHeadlampState,
@@ -489,6 +506,7 @@ impl PublishedHeadlampContext {
 pub struct PublishedVehicleContext {
     pub sccm: PublishedSccmContext,
     pub bcm: PublishedBcmContext,
+    pub flcm: PublishedFlcmContext,
     pub powertrain: PublishedPowertrainContext,
     pub health: PublishedHealthContext,
     pub visibility: PublishedVisibilityContext,
@@ -502,6 +520,7 @@ impl PublishedVehicleContext {
         Self {
             sccm: (&ctx.sccm).into(),
             bcm: (&ctx.bcm).into(),
+            flcm: (&ctx.flcm).into(),
             powertrain: (&ctx.powertrain).into(),
             health: (&ctx.health).into(),
             visibility: (&ctx.visibility).into(),
@@ -600,7 +619,7 @@ mod unix_timestamp_tests {
 #[cfg(test)]
 mod published_projection_tests {
     use super::*;
-    use crate::vehicle_state::{VehicleContext, WiperState};
+    use crate::vehicle_state::{ObservedBool, VehicleContext, WiperState};
 
     #[test]
     fn published_fsm_event_keeps_rain_variants() {
@@ -615,13 +634,25 @@ mod published_projection_tests {
     }
 
     #[test]
-    fn published_vehicle_context_includes_weather_and_wiper() {
+    fn published_vehicle_context_includes_weather_wiper_and_flcm() {
         let clock = SessionClock::capture();
         let mut ctx = VehicleContext::default();
         ctx.weather.raining = true;
         ctx.wiper.state = WiperState::Running;
+        ctx.flcm.left_low_beam_status = ObservedBool::On;
+        ctx.flcm.right_low_beam_status = ObservedBool::Off;
+        ctx.flcm.silent = true;
         let pub_ctx = PublishedVehicleContext::project(&ctx, &clock);
         assert!(pub_ctx.weather.raining);
         assert_eq!(pub_ctx.wiper.state, PublishedWiperState::Running);
+        assert_eq!(
+            pub_ctx.flcm.left_low_beam_status_ok,
+            PublishedObservedBool::On
+        );
+        assert_eq!(
+            pub_ctx.flcm.right_low_beam_status_ok,
+            PublishedObservedBool::Off
+        );
+        assert!(pub_ctx.flcm.silent);
     }
 }

@@ -49,12 +49,21 @@ fn pre_phase_i_v3_run_reads_with_defaulted_sccm_and_bcm_contexts() {
         assert_eq!(context.bcm.state, observation::schema::v1::BcmStateV1::Off);
         assert_eq!(context.bcm.left_turn_request_on, ObservedBoolV1::Off);
         assert_eq!(context.bcm.right_turn_request_on, ObservedBoolV1::Off);
+        assert_eq!(
+            context.flcm.left_low_beam_status_ok,
+            ObservedBoolV1::Unknown
+        );
+        assert_eq!(
+            context.flcm.right_low_beam_status_ok,
+            ObservedBoolV1::Unknown
+        );
+        assert!(!context.flcm.silent);
     }
 }
 
 #[test]
-fn current_schema_version_is_v6() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 6);
+fn current_schema_version_is_v7() {
+    assert_eq!(CURRENT_SCHEMA_VERSION, 7);
 }
 
 /// Write a fresh, valid fixture (two diagnostics, one ledger row) under `parent` and return the
@@ -71,13 +80,13 @@ fn write_fixture(parent: &Path) -> PathBuf {
 }
 
 #[test]
-fn new_writer_emits_schema_v6_manifest_and_rows() {
+fn new_writer_emits_schema_v7_manifest_and_rows() {
     let temp = tempfile::tempdir().unwrap();
     let run_dir = write_fixture(temp.path());
     let manifest: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(run_dir.join("manifest.json")).unwrap())
             .unwrap();
-    assert_eq!(manifest["schema_version"], 6);
+    assert_eq!(manifest["schema_version"], 7);
 
     for stream in ["diagnostic.jsonl", "ledger.jsonl"] {
         let row: serde_json::Value = serde_json::from_str(
@@ -88,7 +97,7 @@ fn new_writer_emits_schema_v6_manifest_and_rows() {
                 .unwrap(),
         )
         .unwrap();
-        assert_eq!(row["schema_version"], 6, "{stream}");
+        assert_eq!(row["schema_version"], 7, "{stream}");
     }
 }
 
@@ -149,6 +158,32 @@ fn historical_v1_v2_v3_golden_fixtures_still_read() {
         .expect("schema-v3 golden must remain supported")
         .load()
         .expect("schema-v3 golden must load");
+}
+
+#[test]
+fn v6_golden_without_flcm_defaults_to_unknown_and_not_silent() {
+    let run_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("testdata/golden/v6")
+        .join(RUN_ID);
+    let reader = RunReader::open(&run_dir).expect("schema-v6 golden must remain supported");
+    let envelope = reader
+        .ledger()
+        .unwrap()
+        .next()
+        .unwrap()
+        .expect("schema-v6 ledger must deserialize");
+
+    for context in [&envelope.payload.old_ctx, &envelope.payload.current_ctx] {
+        assert_eq!(
+            context.flcm.left_low_beam_status_ok,
+            ObservedBoolV1::Unknown
+        );
+        assert_eq!(
+            context.flcm.right_low_beam_status_ok,
+            ObservedBoolV1::Unknown
+        );
+        assert!(!context.flcm.silent);
+    }
 }
 
 #[test]
@@ -241,24 +276,24 @@ fn overwrite_jsonl_line(path: &Path, line_number: usize, replacement: &str) {
 }
 
 #[test]
-fn unsupported_v7_manifest_is_rejected_clearly() {
+fn unsupported_v8_manifest_is_rejected_clearly() {
     let temp = tempfile::tempdir().unwrap();
     let run_dir = write_fixture(temp.path());
     mutate_json_file(&run_dir.join("manifest.json"), |value| {
-        value["schema_version"] = serde_json::json!(7);
+        value["schema_version"] = serde_json::json!(8);
     });
 
     let error = RunReader::open(&run_dir).unwrap_err();
     match error {
         ObservationError::UnsupportedSchema { found, supported } => {
-            assert_eq!(found, 7);
-            assert_eq!(supported, 6);
+            assert_eq!(found, 8);
+            assert_eq!(supported, 7);
         }
         other => panic!("expected UnsupportedSchema, got {other:?}"),
     }
     assert!(
-        error.to_string().contains('7') && error.to_string().contains('6'),
-        "unsupported v7 must name the found and supported versions: {error}"
+        error.to_string().contains('8') && error.to_string().contains('7'),
+        "unsupported v8 must name the found and supported versions: {error}"
     );
 }
 
@@ -293,7 +328,7 @@ fn diagnostic_row_schema_version_mismatch_is_rejected() {
     let error = reader.diagnostics().unwrap().next().unwrap().unwrap_err();
     match error {
         ObservationError::SchemaVersionMismatch { manifest, row } => {
-            assert_eq!(manifest, 6);
+            assert_eq!(manifest, 7);
             assert_eq!(row, 3);
         }
         other => panic!("expected SchemaVersionMismatch, got {other:?}"),

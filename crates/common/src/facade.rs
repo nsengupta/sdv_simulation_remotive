@@ -32,7 +32,7 @@ pub use crate::observation_records::diagnostic::{
     DiagnosticKind, DiagnosticLevel, DiagnosticRecord,
 };
 pub use crate::observation_records::transition::{
-    PublishedBcmContext, PublishedBcmState, PublishedDomainAction,
+    PublishedBcmContext, PublishedBcmState, PublishedDomainAction, PublishedFlcmContext,
     PublishedFrontHeadlampIncompleteCause, PublishedFrontHeadlampSwitchDirection,
     PublishedFsmEvent, PublishedFsmState, PublishedHeadlampContext, PublishedHeadlampState,
     PublishedHealthContext, PublishedObservedBool, PublishedOperational,

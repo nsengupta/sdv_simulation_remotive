@@ -2,11 +2,12 @@ use std::time::Duration;
 
 use common::facade::{
     DiagnosticKind, DiagnosticLevel, DiagnosticRecord, PublishedBcmContext, PublishedBcmState,
-    PublishedDomainAction, PublishedFsmEvent, PublishedFsmState, PublishedHeadlampContext,
-    PublishedHeadlampState, PublishedHealthContext, PublishedObservedBool,
-    PublishedPowertrainContext, PublishedSccmContext, PublishedTransitionRecord,
-    PublishedVehicleContext, PublishedVisibilityContext, PublishedWeatherContext,
-    PublishedWheelRpm, PublishedWiperContext, PublishedWiperState, UnixTimestamp,
+    PublishedDomainAction, PublishedFlcmContext, PublishedFsmEvent, PublishedFsmState,
+    PublishedHeadlampContext, PublishedHeadlampState, PublishedHealthContext,
+    PublishedObservedBool, PublishedPowertrainContext, PublishedSccmContext,
+    PublishedTransitionRecord, PublishedVehicleContext, PublishedVisibilityContext,
+    PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
+    UnixTimestamp,
 };
 
 pub const RUN_ID: &str = "00000000-0000-4000-8000-000000000001";
@@ -54,6 +55,11 @@ pub fn sample_ledger() -> PublishedTransitionRecord {
             state: PublishedBcmState::Ready,
             left_turn_request_on: PublishedObservedBool::Unknown,
             right_turn_request_on: PublishedObservedBool::Unknown,
+        },
+        flcm: PublishedFlcmContext {
+            left_low_beam_status_ok: PublishedObservedBool::Unknown,
+            right_low_beam_status_ok: PublishedObservedBool::Unknown,
+            silent: false,
         },
         powertrain: PublishedPowertrainContext {
             wheel_rpm: PublishedWheelRpm {

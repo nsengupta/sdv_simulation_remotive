@@ -1,33 +1,34 @@
 #[allow(dead_code)]
 mod support;
 
-use common::facade::{PublishedDomainAction, PublishedFsmEvent, PublishedObservedBool};
+use common::facade::{
+    DiagnosticKind, PublishedDomainAction, PublishedFsmEvent, PublishedObservedBool,
+};
 use observation::schema::CURRENT_SCHEMA_VERSION;
 use observation::schema::v1::{
-    BcmContextV1, BcmStateV1, DomainActionV1, FsmEventV1, ObservedBoolV1, SccmContextV1,
-    ledger_envelope,
+    BcmContextV1, BcmStateV1, DiagnosticKindV1, DomainActionV1, FlcmContextV1, FsmEventV1,
+    ObservedBoolV1, SccmContextV1, diagnostic_envelope, ledger_envelope,
 };
 
 #[test]
-fn current_schema_version_is_v6() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 6);
+fn current_schema_version_is_v7() {
+    assert_eq!(CURRENT_SCHEMA_VERSION, 7);
 }
 
 #[test]
 fn v5_sccm_json_without_hazard_mode_defaults_off() {
-    let sccm: SccmContextV1 =
-        serde_json::from_str(r#"{"hazard_button_on":"on"}"#).unwrap();
+    let sccm: SccmContextV1 = serde_json::from_str(r#"{"hazard_button_on":"on"}"#).unwrap();
     assert_eq!(sccm.hazard_mode_on, ObservedBoolV1::Off);
 }
 
 #[test]
-fn v6_initial_observed_values_serialize_as_unknown() {
+fn v7_initial_observed_values_serialize_as_unknown() {
     let metadata = support::fixed_run_metadata();
     let live = support::sample_ledger();
     let envelope = ledger_envelope(&metadata, &live).expect("sample ledger projection");
     let json = serde_json::to_value(&envelope).expect("serialize v5 envelope");
 
-    assert_eq!(json["schema_version"], 6);
+    assert_eq!(json["schema_version"], 7);
     assert_eq!(
         json["payload"]["old_ctx"]["sccm"]["hazard_button_on"],
         "unknown"
@@ -43,6 +44,42 @@ fn v6_initial_observed_values_serialize_as_unknown() {
     assert_eq!(
         json["payload"]["current_ctx"]["bcm"]["right_turn_request_on"],
         "unknown"
+    );
+    assert_eq!(
+        json["payload"]["current_ctx"]["flcm"],
+        serde_json::json!({
+            "left_low_beam_status_ok": "unknown",
+            "right_low_beam_status_ok": "unknown",
+            "silent": false
+        })
+    );
+}
+
+#[test]
+fn missing_flcm_context_defaults_to_unknown_and_not_silent() {
+    let flcm: FlcmContextV1 = serde_json::from_str("{}").unwrap();
+    assert_eq!(flcm.left_low_beam_status_ok, ObservedBoolV1::Unknown);
+    assert_eq!(flcm.right_low_beam_status_ok, ObservedBoolV1::Unknown);
+    assert!(!flcm.silent);
+}
+
+#[test]
+fn flcm_fault_diagnostic_has_a_dedicated_wire_variant() {
+    let mut diagnostic = support::sample_diagnostic();
+    diagnostic.kind = DiagnosticKind::FlcmLampFault {
+        silent: true,
+        left_fail: false,
+        right_fail: true,
+    };
+
+    let envelope = diagnostic_envelope(&support::fixed_run_metadata(), &diagnostic).unwrap();
+    assert_eq!(
+        envelope.payload.kind,
+        DiagnosticKindV1::FlcmLampFault {
+            silent: true,
+            left_fail: false,
+            right_fail: true,
+        }
     );
 }
 
@@ -72,7 +109,7 @@ fn observed_events_round_trip_losslessly() {
         live.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::Off;
 
         let envelope = ledger_envelope(&metadata, &live).expect("observed ledger projection");
-        assert_eq!(envelope.schema_version, 6);
+        assert_eq!(envelope.schema_version, 7);
         assert_eq!(envelope.payload.event, expected_dto);
         assert_eq!(
             envelope.payload.current_ctx.sccm.hazard_button_on,

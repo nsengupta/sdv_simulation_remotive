@@ -830,11 +830,11 @@ mod tests {
 
     fn empty_published_ctx() -> common::facade::PublishedVehicleContext {
         use common::facade::{
-            PublishedBcmContext, PublishedBcmState, PublishedHeadlampContext,
+            PublishedBcmContext, PublishedBcmState, PublishedFlcmContext, PublishedHeadlampContext,
             PublishedHeadlampState, PublishedHealthContext, PublishedObservedBool,
             PublishedPowertrainContext, PublishedSccmContext, PublishedVehicleContext,
-            PublishedVisibilityContext,
-            PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
+            PublishedVisibilityContext, PublishedWeatherContext, PublishedWheelRpm,
+            PublishedWiperContext, PublishedWiperState,
         };
         PublishedVehicleContext {
             sccm: PublishedSccmContext {
@@ -846,6 +846,7 @@ mod tests {
                 left_turn_request_on: PublishedObservedBool::Unknown,
                 right_turn_request_on: PublishedObservedBool::Unknown,
             },
+            flcm: PublishedFlcmContext::default(),
             powertrain: PublishedPowertrainContext {
                 wheel_rpm: PublishedWheelRpm {
                     front_left: 0,

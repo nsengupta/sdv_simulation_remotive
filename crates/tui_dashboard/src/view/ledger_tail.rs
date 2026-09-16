@@ -144,7 +144,7 @@ fn format_bcm_state(state: PublishedBcmState) -> &'static str {
 mod tests {
     use super::*;
     use common::facade::{
-        PublishedBcmContext, PublishedHeadlampContext, PublishedHeadlampState,
+        PublishedBcmContext, PublishedFlcmContext, PublishedHeadlampContext, PublishedHeadlampState,
         PublishedHealthContext, PublishedPowertrainContext,
         PublishedSccmContext,
         PublishedVehicleContext, PublishedVisibilityContext, PublishedWeatherContext,
@@ -179,6 +179,7 @@ mod tests {
                 left_turn_request_on: PublishedObservedBool::Unknown,
                 right_turn_request_on: PublishedObservedBool::Unknown,
             },
+            flcm: PublishedFlcmContext::default(),
             powertrain: PublishedPowertrainContext {
                 wheel_rpm: PublishedWheelRpm {
                     front_left: 0,
