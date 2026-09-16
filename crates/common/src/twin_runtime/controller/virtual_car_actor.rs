@@ -394,14 +394,9 @@ impl VirtualCarActor {
             ZoneMessage::Bcm(m) => {
                 tell_bcm_zone(&runtime_state.bcm_actor, brain, turn_id, tell_attempt, *m)
             }
-            ZoneMessage::Flcm(m) => tell_flcm_zone(
-                &runtime_state.flcm_actor,
-                brain,
-                turn_id,
-                tell_attempt,
-                *m,
-                now,
-            ),
+            ZoneMessage::Flcm(m) => {
+                tell_flcm_zone(&runtime_state.flcm_actor, brain, turn_id, tell_attempt, *m)
+            }
             ZoneMessage::Headlamp(m) => tell_headlamp_zone(
                 runtime_state.headlamp_actor.as_ref().ok_or_else(|| {
                     ActorProcessingErr::from(std::io::Error::other(
@@ -483,6 +478,10 @@ impl VirtualCarActor {
     /// [`PassthroughBarrier`] is instantly drainable and keeps the queue ordered.
     /// This covers events with no zone mapping (e.g. `PowerOn`, `TimerTick`) AND
     /// user events arriving during `PreparingToStart` or `PreparingToStop`.
+    ///
+    /// `TimerTick` is deliberately in the passthrough set: FLCM liveness is owned by the
+    /// FLCM actor's cancellable silence deadline, which arrives as a `ZoneSpontaneous`
+    /// message rather than a tick-driven zone turn.
     async fn begin_fsm_turn(
         brain: &ActorRef<TwinMessage>,
         runtime_state: &mut VirtualCarRuntimeState,
@@ -777,7 +776,6 @@ impl VirtualCarActor {
                 0,
                 0,
                 message,
-                Instant::now(),
             )?;
         }
 

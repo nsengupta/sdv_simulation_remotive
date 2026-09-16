@@ -6,6 +6,7 @@ use common::digital_twin::ZoneSpontaneousEvent;
 use common::fsm::{AssemblyId, FsmState};
 use common::observation_records::diagnostic::{DiagnosticKind, DiagnosticLevel, DiagnosticRecord};
 use common::observation_records::transition::SessionClock;
+use common::twin_runtime::FLCM_SILENCE_THRESHOLD;
 use common::vehicle_state::{
     FlcmContext, FlcmMessage, FlcmZoneReply, ObservationDisposition, ObservedBool,
 };
@@ -301,6 +302,92 @@ async fn runtime_warns_once_after_500ms_silence_and_clears_on_healthy_traffic() 
             right_fail: false
         }
     ));
+
+    controller.get_actor_ref().stop(None);
+    handle.await.expect("controller task");
+}
+
+/// A topology that never publishes FLCM status (Phase I/II/III demos, emulator-only runs)
+/// must stay `Unknown` — the watchdog is armed by the first observation, not by power-on.
+#[tokio::test]
+async fn runtime_never_warns_when_flcm_was_never_observed() {
+    let (diagnostic_tx, mut diagnostic_rx) = tokio::sync::mpsc::unbounded_channel();
+    let options = VehicleControllerRuntimeOptions {
+        diagnostic_tx: Some(diagnostic_tx),
+        ..Default::default()
+    };
+    let (controller, handle) =
+        VehicleController::install_and_start_with_options("FLCM-NEVER-OBSERVED".into(), options)
+            .await
+            .expect("install controller");
+    assert_eq!(
+        diagnostic_rx.recv().await.expect("boot diagnostic").kind,
+        DiagnosticKind::Boot
+    );
+
+    controller.send_power_on().await.expect("power on");
+    wait_for_idle(&controller).await;
+
+    tokio::time::sleep(FLCM_SILENCE_THRESHOLD + Duration::from_millis(200)).await;
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), diagnostic_rx.recv())
+            .await
+            .is_err(),
+        "power-on without any FLCM traffic must not emit FlcmLampFault"
+    );
+    let snapshot = controller
+        .get_snapshot(Some(Duration::from_millis(250)))
+        .await
+        .expect("snapshot after quiet interval");
+    assert_eq!(snapshot.context().flcm, FlcmContext::default());
+
+    controller.get_actor_ref().stop(None);
+    handle.await.expect("controller task");
+}
+
+/// Brain ticks are a passthrough turn; the actor-owned deadline is the only silence source.
+#[tokio::test]
+async fn runtime_timer_ticks_do_not_decide_flcm_silence() {
+    let (diagnostic_tx, mut diagnostic_rx) = tokio::sync::mpsc::unbounded_channel();
+    let options = VehicleControllerRuntimeOptions {
+        diagnostic_tx: Some(diagnostic_tx),
+        ..Default::default()
+    };
+    let (controller, handle) =
+        VehicleController::install_and_start_with_options("FLCM-TICK-PASSTHROUGH".into(), options)
+            .await
+            .expect("install controller");
+    assert_eq!(
+        diagnostic_rx.recv().await.expect("boot diagnostic").kind,
+        DiagnosticKind::Boot
+    );
+
+    controller.send_power_on().await.expect("power on");
+    wait_for_idle(&controller).await;
+
+    for _ in 0..3 {
+        controller
+            .submit_twin_ingress(TwinIngressEvent::TimerTick)
+            .await
+            .expect("timer tick");
+    }
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let snapshot = controller
+        .get_snapshot(Some(Duration::from_millis(250)))
+        .await
+        .expect("snapshot after ticks");
+    assert!(
+        !snapshot.context().flcm.silent,
+        "TimerTick must not decide FLCM silence"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), diagnostic_rx.recv())
+            .await
+            .is_err(),
+        "TimerTick must not emit FlcmLampFault"
+    );
 
     controller.get_actor_ref().stop(None);
     handle.await.expect("controller task");

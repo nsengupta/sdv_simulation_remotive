@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 /// - ExtremeOperationWarning + TimerTick + cooldown + warning cleared (still rolling) -> Driving/Idle
 /// - PreparingToStop({a,...}) + AssemblyZoneReady(a) -> PreparingToStop({...}) or Off (when set empties)
 /// - PreparingToStop + anything else -> PreparingToStop (self-loop, set unchanged)
+/// - Idle/Driving/DrivingDangerously/ExtremeOperationWarning + any observation (hazard button, turn request, low-beam status) or `AssemblyZoneReady(Flcm)` -> explicit self-loop, because observing an ECU and FLCM's out-of-band liveness verdict never change the mode
 /// - Everything else -> stay in current state
 ///
 /// `VehicleContext` carries no separate `remaining_assemblies` field; the `BTreeSet` embedded
@@ -98,7 +99,10 @@ pub fn transition(
             HazardButtonChanged(_)
             | HazardButtonObserved(_)
             | LeftTurnRequestObserved(_)
-            | RightTurnRequestObserved(_) => TransitionResult {
+            | RightTurnRequestObserved(_)
+            | LeftLowBeamStatusObserved(_)
+            | RightLowBeamStatusObserved(_)
+            | AssemblyZoneReady(AssemblyId::Flcm) => TransitionResult {
                 next_state: Idle,
                 note: None,
             },
@@ -119,7 +123,10 @@ pub fn transition(
             HazardButtonChanged(_)
             | HazardButtonObserved(_)
             | LeftTurnRequestObserved(_)
-            | RightTurnRequestObserved(_) => TransitionResult {
+            | RightTurnRequestObserved(_)
+            | LeftLowBeamStatusObserved(_)
+            | RightLowBeamStatusObserved(_)
+            | AssemblyZoneReady(AssemblyId::Flcm) => TransitionResult {
                 next_state: Driving,
                 note: None,
             },
@@ -148,7 +155,10 @@ pub fn transition(
             HazardButtonChanged(_)
             | HazardButtonObserved(_)
             | LeftTurnRequestObserved(_)
-            | RightTurnRequestObserved(_) => TransitionResult {
+            | RightTurnRequestObserved(_)
+            | LeftLowBeamStatusObserved(_)
+            | RightLowBeamStatusObserved(_)
+            | AssemblyZoneReady(AssemblyId::Flcm) => TransitionResult {
                 next_state: DrivingDangerously,
                 note: None,
             },
@@ -177,7 +187,10 @@ pub fn transition(
             HazardButtonChanged(_)
             | HazardButtonObserved(_)
             | LeftTurnRequestObserved(_)
-            | RightTurnRequestObserved(_) => TransitionResult {
+            | RightTurnRequestObserved(_)
+            | LeftLowBeamStatusObserved(_)
+            | RightLowBeamStatusObserved(_)
+            | AssemblyZoneReady(AssemblyId::Flcm) => TransitionResult {
                 next_state: ExtremeOperationWarning(*began_at),
                 note: None,
             },

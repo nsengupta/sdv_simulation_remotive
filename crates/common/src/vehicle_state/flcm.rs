@@ -9,13 +9,17 @@ pub struct FlcmContext {
     pub silent: bool,
 }
 
+/// FLCM zone vocabulary.
+///
+/// There is no `TimerTick` arm: liveness is owned by the actor's cancellable silence
+/// deadline, which reports through [`FlcmMessage::SilenceChanged`]. Brain ticks stay a
+/// passthrough turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlcmMessage {
     BecomeOn,
     BecomeOff,
     LeftLowBeamStatusObserved(bool),
     RightLowBeamStatusObserved(bool),
-    TimerTick,
     SilenceChanged(bool),
 }
 
@@ -46,10 +50,9 @@ impl FlcmContext {
 
     pub fn on_receiving_message(&self, message: FlcmMessage) -> FlcmZoneReply {
         let disposition = match message {
-            FlcmMessage::BecomeOn
-            | FlcmMessage::BecomeOff
-            | FlcmMessage::TimerTick
-            | FlcmMessage::SilenceChanged(_) => ObservationDisposition::Lifecycle,
+            FlcmMessage::BecomeOn | FlcmMessage::BecomeOff | FlcmMessage::SilenceChanged(_) => {
+                ObservationDisposition::Lifecycle
+            }
             FlcmMessage::LeftLowBeamStatusObserved(value) => {
                 self.left_low_beam_status.classify(value)
             }
@@ -69,7 +72,6 @@ impl FlcmContext {
                 ctx.right_low_beam_status = ObservedBool::from(value);
                 ctx.silent = false;
             }
-            FlcmMessage::TimerTick => {}
             FlcmMessage::SilenceChanged(silent) => ctx.silent = silent,
         }
 

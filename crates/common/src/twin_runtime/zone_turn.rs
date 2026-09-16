@@ -104,12 +104,14 @@ fn user_event_to_zone_tell(event: &FsmEvent) -> Option<(AssemblyId, ZoneMessage)
             Some((AssemblyId::Wiper, ZoneMessage::Wiper(WiperMessage::Start)))
         }
         FsmEvent::RainsStopped => Some((AssemblyId::Wiper, ZoneMessage::Wiper(WiperMessage::Stop))),
+        // `TimerTick` stays a passthrough turn: FLCM liveness is reported by the actor-owned
+        // silence deadline (`ZoneSpontaneousEvent::Flcm`), not by brain ticks.
         FsmEvent::UpdateRpm(_)
         | FsmEvent::PowerOn
         | FsmEvent::PowerOff
         | FsmEvent::Internal(_)
+        | FsmEvent::TimerTick
         | FsmEvent::AssemblyZoneReady(_) => None,
-        FsmEvent::TimerTick => Some((AssemblyId::Flcm, ZoneMessage::Flcm(FlcmMessage::TimerTick))),
     }
 }
 
@@ -276,8 +278,6 @@ pub fn zone_turn(
             outcomes.extend(zone_reply.outcomes.into_iter().map(ZoneOutcome::Headlamp));
         }
         FsmEvent::TimerTick => {
-            let flcm_reply = merge_flcm_for_message(ctx, FlcmMessage::TimerTick, flcm_ingress);
-            next.flcm = flcm_reply.ctx;
             let zone_reply =
                 merge_headlamp_for_message(ctx, HeadlampMessage::TimerTick, now, headlamp_ingress);
             next.headlamp = zone_reply.ctx;
@@ -296,16 +296,10 @@ pub fn zone_turn(
             outcomes.extend(zone_reply.outcomes.into_iter().map(ZoneOutcome::Wiper));
         }
         FsmEvent::PowerOn => {
-            next.flcm = ctx
-                .flcm
-                .on_receiving_message(FlcmMessage::BecomeOn)
-                .ctx;
+            next.flcm = ctx.flcm.on_receiving_message(FlcmMessage::BecomeOn).ctx;
         }
         FsmEvent::PowerOff => {
-            next.flcm = ctx
-                .flcm
-                .on_receiving_message(FlcmMessage::BecomeOff)
-                .ctx;
+            next.flcm = ctx.flcm.on_receiving_message(FlcmMessage::BecomeOff).ctx;
         }
         FsmEvent::Internal(_) => {}
         FsmEvent::AssemblyZoneReady(assembly_id) => match assembly_id {
