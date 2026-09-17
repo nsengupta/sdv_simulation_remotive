@@ -473,73 +473,109 @@ git commit -m "test(gateway): FLCM status observation e2e"
 Evidence for the first blocked attempt remains under `.superpowers/sdd/phase-iv/`
 (gitignored).
 
-**Blocker (unchanged since 2026-09-16):** `remotivebusd` is `inactive` and
-`/run/docker/plugins/remotivebus.sock` is absent, so Hello World compose cannot create
-the RemotiveBus CAN networks:
+#### Placeholders (use in public README / blog)
 
-```text
-failed to create network remotive_car_hello_world_BodyCan0:
-dial unix /run/docker/plugins/remotivebus.sock: connect: no such file or directory
+| Placeholder | Meaning |
+|-------------|---------|
+| `$REMOTIVE_EXAMPLES` | Clone of `remotivelabs-topology-examples` (contains `remotive_car/`) |
+| `$TWIN_REPO` | Clone of this Twin repo (`sdv_simulation_remotive`) |
+| `$REMOTIVE_BRANCH` | Remotive demo branch: `demo/flcm-lamp-status-feedback` |
+| `$BROKER_URL` | Host broker URL published by Hello World (default `http://127.0.0.1:50051`) |
+| `$CAN_IFACE` | Twin SocketCAN iface (default `vcan0`) |
+| `$COMPOSE_PROJECT` | Compose project name (default `remotive_car_hello_world`) |
+| `$HELLO_WORLD_BUILD` | `$REMOTIVE_EXAMPLES/remotive_car/build/remotive_car_hello_world` |
+
+Optional one-shot export before copy-paste:
+
+```bash
+export REMOTIVE_EXAMPLES=/path/to/remotivelabs-topology-examples
+export TWIN_REPO=/path/to/sdv_simulation_remotive
+export REMOTIVE_BRANCH=demo/flcm-lamp-status-feedback
+export BROKER_URL=http://127.0.0.1:50051
+export CAN_IFACE=vcan0
+export COMPOSE_PROJECT=remotive_car_hello_world
+export HELLO_WORLD_BUILD="$REMOTIVE_EXAMPLES/remotive_car/build/remotive_car_hello_world"
 ```
 
-`sudo -n systemctl start remotivebusd` requires a password on this host. Docker itself is
-healthy; this is a host-privilege gate, not a code defect, and re-running it later needs
-no Twin change.
+#### Start the application
 
-#### Live run order
-
-- [ ] **Step 0: RemotiveBus prerequisite (root)**
-
-Passwordless Docker is not enough — start the RemotiveBus Docker network plugin first:
+**0 — RemotiveBus (root; required before compose)**
 
 ```bash
 sudo systemctl start remotivebusd
 systemctl is-active remotivebusd            # expect: active
-ls -l /run/docker/plugins/remotivebus.sock  # must exist before compose
+ls -l /run/docker/plugins/remotivebus.sock  # must exist
 ```
 
-- [ ] **Step 1: Remotive branch + Hello World**
+**1 — Hello World (Jupyter + 3D car)**
 
 ```bash
-cd /home/nirmalya/Workspace-Rust/Eclipse-SDV/RemotiveLabs/remotivelabs-topology-examples
-git checkout demo/flcm-lamp-status-feedback
+cd "$REMOTIVE_EXAMPLES"
+git checkout "$REMOTIVE_BRANCH"
 
 remotive topology build --no-workspace \
   -f remotive_car/instances/hello_world/main.instance.yaml \
   remotive_car/build
 
-cd remotive_car/build/remotive_car_hello_world
-docker compose -p remotive_car_hello_world -f docker-compose.yml \
+cd "$HELLO_WORLD_BUILD"
+docker compose -p "$COMPOSE_PROJECT" -f docker-compose.yml \
   --profile jupyter --profile 3dcar \
   up --build -d
 
 ss -ltn | grep -E '3000|8888|50051'
 ```
 
-Cute car `http://127.0.0.1:3000`; Jupyter `http://127.0.0.1:8888` (token
-`remotivelabs`). Do **not** `curl` the broker port `50051`.
+URLs:
 
-- [ ] **Step 2: Twin attach (Gateway first)**
+- Cute car: `http://127.0.0.1:3000/car` (prefer `/car`)
+- Jupyter: `http://127.0.0.1:8888` (token `remotivelabs`)
+- Do **not** `curl` gRPC port `50051`
+
+If the car page stays on **Loading** while Connected, fix the missing GLB once
+per container lifetime:
 
 ```bash
-sudo ip link add dev vcan0 type vcan 2>/dev/null || true
-sudo ip link set up vcan0
+docker exec "${COMPOSE_PROJECT}-3d-car-1" \
+  cp /usr/share/nginx/html/remotivecar5.glb /usr/share/nginx/html/remotivecar3.glb
+curl -sS -o /dev/null -w '%{http_code} %{size_download}\n' \
+  http://127.0.0.1:3000/remotivecar3.glb
+# expect: 200 28447880
+```
 
-cd /home/nirmalya/Workspace-Rust/Eclipse-SDV/Self-handson-project/sdv_simulation_remotive
-# Terminal A
+Then hard-refresh the browser.
+
+**2 — Twin attach (three terminals; Gateway first)**
+
+```bash
+sudo ip link add dev "$CAN_IFACE" type vcan 2>/dev/null || true
+sudo ip link set up "$CAN_IFACE"
+
+cd "$TWIN_REPO"
+```
+
+Terminal A — Gateway:
+
+```bash
 cargo run -p gateway -- --uds observation.sock --connect-timeout 120
-# Terminal B
+```
+
+Terminal B — TUI:
+
+```bash
 cargo run -p tui_dashboard -- --uds observation.sock
-# Terminal C
+```
+
+Terminal C — bridge:
+
+```bash
 cargo run -p remotive_bridge -- \
-  --broker-url http://127.0.0.1:50051 \
-  --can-interface vcan0
+  --broker-url "$BROKER_URL" \
+  --can-interface "$CAN_IFACE"
 # optional motion: --rpm-clamp 3000
 ```
 
-Require this **five-signal** readiness line (locked order) **before** PowerOn — it is
-asserted byte-for-byte by `cargo test -p remotive_bridge --test config_decoder_cli
-subscription_ready_status_proves_connection_and_exact_target`:
+Require this **five-signal** readiness line (locked order) before expecting Twin
+`PowerOn`:
 
 ```text
 [remotive_bridge] connected; subscribed signals=\
@@ -550,10 +586,59 @@ FLCM-BodyCan0:LowBeamLightStatus.LeftLowBeamLightStatus,\
 FLCM-BodyCan0:LowBeamLightStatus.RightLowBeamLightStatus
 ```
 
+**3 — Jupyter notebook**
+
+Open Jupyter → open `car.ipynb` → **Kernel → Restart & Run All** so widgets
+include **FLCM Ok | Fail | Silent**.
+
+#### Run the demo
+
+Follow **Demo order** below (verified live). Equivalent `ControlClient` cells
+are documented under Task 8 Steps 4–6 if buttons are unavailable.
+
+#### Stop and cleanup (this order)
+
+```bash
+# 1) Ctrl+C remotive_bridge, then Gateway and TUI
+
+# 2) Tear down Hello World compose
+cd "$HELLO_WORLD_BUILD"
+docker compose -p "$COMPOSE_PROJECT" -f docker-compose.yml \
+  --profile jupyter --profile 3dcar down
+
+# 3) Confirm no Hello World containers remain
+docker ps -a --filter "name=${COMPOSE_PROJECT}" --format '{{.Names}} {{.Status}}'
+# expect: empty
+
+# 4) Stop RemotiveBus only after compose is down
+sudo systemctl stop remotivebusd
+systemctl is-active remotivebusd || true   # expect: inactive
+
+# 5) Optional: remove Twin UDS sock leftover in $TWIN_REPO
+cd "$TWIN_REPO"
+rm -f observation.sock
+```
+
+Do **not** stop `remotivebusd` while Hello World containers are still up.
+
+Optional deeper cleanup (only if networks/volumes linger):
+
+```bash
+docker network ls | grep -i remotive || true
+docker volume ls | grep -i remotive || true
+# remove only leftovers you own for this project — do not delete unrelated networks
+```
+
+#### Live run order (checklist; same commands as above)
+
+- [x] **Step 0: RemotiveBus prerequisite (root)** — see Start §0
+- [x] **Step 1: Remotive branch + Hello World** — see Start §1
+- [x] **Step 2: Twin attach (Gateway first)** — see Start §2
+
 #### Demo order (README / blog punchline)
 
 Verified live with Jupyter buttons **FLCM Ok | Fail | Silent** and Hazard `!`
-(on Remotive branch `demo/flcm-lamp-status-feedback`, notebook `car.ipynb`).
+(on Remotive branch `$REMOTIVE_BRANCH`, notebook `car.ipynb`).
 Prerequisites: RemotiveBus + Hello World (Jupyter + 3D car) + Twin
 (Gateway → TUI → bridge five-signal ready); cute car at
 `http://127.0.0.1:3000/car` fully loaded (not stuck on Loading).
@@ -573,10 +658,8 @@ FLCM Fail / silence.
 
 Operator notes that bit people:
 
-- If `http://127.0.0.1:3000/car` stays on Loading with Connected, check
-  `/remotivecar3.glb` returns ~28 MB (not 759-byte HTML). Image
-  `remotivelabs/3d-car:latest` may need
-  `docker exec … cp …/remotivecar5.glb …/remotivecar3.glb` after compose up.
+- If `http://127.0.0.1:3000/car` stays on Loading with Connected, apply the
+  `remotivecar3.glb` copy under Start §1.
 - After notebook updates on the Remotive branch, reload `car.ipynb` from disk
   and **Kernel → Restart & Run All** so FLCM buttons appear.
 
@@ -622,18 +705,7 @@ Prefer notebook button **FLCM Ok**:
 
 Hazard `!` → latch ON; cute car blinks; TUI Hazard ON.
 
-- [ ] **Step 8: Shutdown (existing order)**
-
-SIGINT `remotive_bridge` first, then:
-
-```bash
-cd /home/nirmalya/Workspace-Rust/Eclipse-SDV/RemotiveLabs/remotivelabs-topology-examples/remotive_car/build/remotive_car_hello_world
-docker compose -p remotive_car_hello_world -f docker-compose.yml \
-  --profile jupyter --profile 3dcar down
-sudo systemctl stop remotivebusd
-```
-
-Do not stop `remotivebusd` while Hello World containers are still up.
+- [x] **Step 8: Shutdown** — see **Stop and cleanup** above.
 
 ---
 
