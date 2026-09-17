@@ -468,10 +468,10 @@ git commit -m "test(gateway): FLCM status observation e2e"
 
 ### Task 8: Live acceptance + run steps (docs in this plan)
 
-**Status:** automated Twin coverage is GREEN; **live acceptance is operator-blocked**
-pending `remotivebusd`. Steps 1–8 below are the committed run steps — nothing needed
-from a gitignored report. Evidence for the blocked attempt lives (locally, gitignored)
-under `.superpowers/sdd/phase-iv/`.
+**Status:** automated Twin coverage is GREEN; **live acceptance verified**
+2026-09-17 (demo order below). Earlier blocker was host `remotivebusd` only.
+Evidence for the first blocked attempt remains under `.superpowers/sdd/phase-iv/`
+(gitignored).
 
 **Blocker (unchanged since 2026-09-16):** `remotivebusd` is `inactive` and
 `/run/docker/plugins/remotivebus.sock` is absent, so Hello World compose cannot create
@@ -550,16 +550,46 @@ FLCM-BodyCan0:LowBeamLightStatus.LeftLowBeamLightStatus,\
 FLCM-BodyCan0:LowBeamLightStatus.RightLowBeamLightStatus
 ```
 
-- [ ] **Step 3: Healthy baseline**
+#### Demo order (README / blog punchline)
 
-Jupyter (existing light-stalk widgets): set light mode / low beams ON.  
+Verified live with Jupyter buttons **FLCM Ok | Fail | Silent** and Hazard `!`
+(on Remotive branch `demo/flcm-lamp-status-feedback`, notebook `car.ipynb`).
+Prerequisites: RemotiveBus + Hello World (Jupyter + 3D car) + Twin
+(Gateway → TUI → bridge five-signal ready); cute car at
+`http://127.0.0.1:3000/car` fully loaded (not stuck on Loading).
+
+| Step | Jupyter action | Expect |
+|------|----------------|--------|
+| 1 | Light stalk → **Low Beam** | Cute car front low beams **ON**; TUI low-beam L/R **OK** / alive; no FLCM Warning |
+| 2 | **FLCM Fail** | TUI **Warning** + low-beam **FAIL**; cute car **still ON** (BCM request path) |
+| 3 | **FLCM Ok** | Warning clears; TUI **OK** again; cute car still ON |
+| 4 | **FLCM Silent** | Within ~500 ms: TUI Warning / **stale\|SILENT**; cute car **still ON** |
+| 5 | **FLCM Ok** | Recovers to OK / alive |
+| 6 | Hazard **`!`** | Cute car blinks; TUI **Hazard ON** and stays ON after the pulse (Phase III latch) |
+
+**Story for README/blog:** steps **2** and **4** are the Twin value-add —
+Remotive visuals stay on open-loop BCM *requests* while Twin alone surfaces
+FLCM Fail / silence.
+
+Operator notes that bit people:
+
+- If `http://127.0.0.1:3000/car` stays on Loading with Connected, check
+  `/remotivecar3.glb` returns ~28 MB (not 759-byte HTML). Image
+  `remotivelabs/3d-car:latest` may need
+  `docker exec … cp …/remotivecar5.glb …/remotivecar3.glb` after compose up.
+- After notebook updates on the Remotive branch, reload `car.ipynb` from disk
+  and **Kernel → Restart & Run All** so FLCM buttons appear.
+
+- [x] **Step 3: Healthy baseline** (demo order step 1)
+
+Jupyter light stalk → Low Beam (or buttons after Run All).  
 Expect: cute car front low beams ON; TUI low-beam L/R **OK**; `FLCM: alive`; no FLCM
 Warning.
 
-- [ ] **Step 4: Fault — Fail**
+- [x] **Step 4: Fault — Fail** (demo order step 2)
 
-Same `ControlClient` pattern as BCM `emergency_mode`; the notebook kernel already holds
-`c`. Do **not** invent a second inject mechanism.
+Prefer notebook button **FLCM Fail**. Equivalent control API (same as BCM
+`emergency_mode` shape):
 
 ```python
 from remotivelabs.topology.control import ControlClient, ControlRequest
@@ -569,7 +599,9 @@ async with ControlClient(client=c) as cc:
     # expect: TUI Warning + Low beam L/R FAIL; cute car still ON
 ```
 
-- [ ] **Step 5: Fault — Silent**
+- [x] **Step 5: Fault — Silent** (demo order step 4)
+
+Prefer notebook button **FLCM Silent**:
 
 ```python
     await cc.send("FLCM", ControlRequest(type="flcm_fault", argument="silent"))
@@ -577,16 +609,18 @@ async with ControlClient(client=c) as cc:
     # "FLCM: SILENT"; cute car still ON
 ```
 
-- [ ] **Step 6: Resume**
+- [x] **Step 6: Resume** (demo order steps 3 and 5)
+
+Prefer notebook button **FLCM Ok**:
 
 ```python
     await cc.send("FLCM", ControlRequest(type="flcm_fault", argument="ok"))
     # expect: Warning clears (Info FlcmLampFault); status OK; FLCM: alive
 ```
 
-- [ ] **Step 7: Phase III still works**
+- [x] **Step 7: Phase III still works** (demo order step 6)
 
-Existing notebook hazard pulse → latch ON; cute car blinks; TUI Hazard ON.
+Hazard `!` → latch ON; cute car blinks; TUI Hazard ON.
 
 - [ ] **Step 8: Shutdown (existing order)**
 
