@@ -36,8 +36,8 @@ pub fn subscription_ready_status() -> String {
         .iter()
         .map(|(namespace, name)| format!("{namespace}:{name}"))
         .collect::<Vec<_>>()
-        .join(",");
-    format!("[remotive_bridge] connected; subscribed signals={signals}")
+        .join(",\n");
+    format!("[remotive_bridge] connected; subscribed signals=\n{signals}")
 }
 
 pub fn subscription_config() -> SubscriberConfig {

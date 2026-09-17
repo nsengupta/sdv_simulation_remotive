@@ -1,27 +1,22 @@
 //! Structured pane lines (semantic styles; no Ratatui).
 
 use super::fit_line;
-use common::vehicle_physics::{
-    LUX_OFF_THRESHOLD, LUX_ON_THRESHOLD, SpeedBand, SpeedBarCell,
-};
+use common::vehicle_physics::{SpeedBand, SpeedBarCell};
 use unicode_width::UnicodeWidthStr;
 
-/// Stable identity of a pane row (whole-line policy later).
+/// Stable identity of a pane row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineRole {
     Standby,
     Notice,
     Speed,
     Visibility,
-    /// Retained for Phase I weather/wiper rows; unused in the Phase II active driver view.
-    #[allow(dead_code)]
-    Weather,
     EngineerState,
     EngineerEvent,
     EngineerHeading,
     EngineerAssembly,
     LedgerRow,
- /// Blank vertical rhythm between Driver segments (presentation only).
+    /// Blank vertical rhythm between Driver segments (presentation only).
     Spacer,
 }
 
@@ -30,7 +25,7 @@ pub enum LineRole {
 pub enum SegmentStyle {
     Default,
     Mute,
- /// Driver field labels (Notice / Speed / Visibility / Weather).
+    /// Driver field labels (Notice / Speed / Visibility).
     Label,
     ZoneGreen,
     ZoneYellow,
@@ -47,55 +42,11 @@ impl SegmentStyle {
     }
 }
 
-/// Driver glyph vocabulary (not on the wire — presentation only).
-/// Kept for compatibility; the Phase II active driver view does not emit icons.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DriverIcon {
-    LuxDark,
-    LuxHold,
-    LuxBright,
-    Dry,
-    Raining,
-    WiperOff,
-    WiperOn,
-}
-
-impl DriverIcon {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::LuxDark => "◼",
-            Self::LuxHold => "▦",
-            Self::LuxBright => "◻",
-            Self::Dry => "☀",
-            Self::Raining => "☁",
-            Self::WiperOff => "x",
-            Self::WiperOn => "≋",
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn for_ambient_lux(lux: u16) -> Self {
-        if lux <= LUX_ON_THRESHOLD {
-            Self::LuxDark
-        } else if lux >= LUX_OFF_THRESHOLD {
-            Self::LuxBright
-        } else {
-            Self::LuxHold
-        }
-    }
-}
-
 /// Inline content for one segment of a [`PaneLine`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SegmentContent {
     Text(String),
     SpeedBar { cells: Vec<SpeedBarCell> },
- /// Reserved: coloured visibility boxes (not emitted yet).
-    #[allow(dead_code)]
-    Swatch,
-    #[allow(dead_code)]
-    Icon(DriverIcon),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,7 +76,7 @@ impl PaneLine {
         Self::plain(role, fit_line(text, width))
     }
 
- /// Blank spacer row occupying `width` columns.
+    /// Blank spacer row occupying `width` columns.
     pub fn spacer(width: usize) -> Self {
         Self {
             role: LineRole::Spacer,
@@ -136,7 +87,7 @@ impl PaneLine {
         }
     }
 
- /// Flatten to a single string (tests / width checks).
+    /// Flatten to a single string (tests / width checks).
     pub fn text(&self) -> String {
         let mut out = String::new();
         for seg in &self.segments {
@@ -147,8 +98,6 @@ impl PaneLine {
                         out.push(if c.filled { '|' } else { '.' });
                     }
                 }
-                SegmentContent::Swatch => {}
-                SegmentContent::Icon(icon) => out.push_str(icon.as_str()),
             }
         }
         out
@@ -158,7 +107,7 @@ impl PaneLine {
         self.text().width()
     }
 
- /// Pad with trailing spaces so the line occupies exactly `width` columns.
+    /// Pad with trailing spaces so the line occupies exactly `width` columns.
     pub fn pad_to_width(mut self, width: usize) -> Self {
         if width == 0 {
             return self;

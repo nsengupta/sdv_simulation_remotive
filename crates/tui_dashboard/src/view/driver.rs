@@ -715,8 +715,6 @@ mod tests {
         assert!(!text.contains("Low beam L: OFF"), "{text}");
     }
 
-    /// The silence demo must be readable on the pane itself, not only in the instant the
-    /// Warning Notice arrives: last-known `OK` next to a dead FLCM is the wrong story.
     #[test]
     fn driver_low_beam_rows_show_stale_while_flcm_is_silent() {
         let mut ledger = sample_ledger(10, 100, PublishedHeadlampState::On);

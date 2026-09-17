@@ -15,11 +15,9 @@ pub const MISSING: &str = "—";
 use common::facade::PublishedObservedBool;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-/// Render one FLCM low-beam status row for the attended panes.
+/// Map FLCM low-beam status wire (`On`/`Off`/`Unknown`) to pane text.
 ///
-/// FLCM status wire: `On` = OK, `Off` = Fail, `Unknown` = not yet observed. When the FLCM
-/// silence watchdog has expired, the status fields legitimately keep their last observed
-/// values, so the row is marked `(stale)` — otherwise a dead FLCM reads as a healthy `OK`.
+/// While `silent`, append `(stale)` so last-known values are not read as live health.
 pub fn format_low_beam_status(value: PublishedObservedBool, silent: bool) -> String {
     let status = match value {
         PublishedObservedBool::Unknown => "UNKNOWN",

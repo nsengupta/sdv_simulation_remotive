@@ -85,11 +85,11 @@ fn subscription_config_rejects_hello_world_signal_widening() {
 fn subscription_ready_status_proves_connection_and_exact_target() {
     assert_eq!(
         subscription_ready_status(),
-        "[remotive_bridge] connected; subscribed signals=\
-SCCM-DriverCan0:HazardLightButton.HazardLightButton,\
-BCM-BodyCan0:TurnLightControl.LeftTurnLightRequest,\
-BCM-BodyCan0:TurnLightControl.RightTurnLightRequest,\
-FLCM-BodyCan0:LowBeamLightStatus.LeftLowBeamLightStatus,\
+        "[remotive_bridge] connected; subscribed signals=\n\
+SCCM-DriverCan0:HazardLightButton.HazardLightButton,\n\
+BCM-BodyCan0:TurnLightControl.LeftTurnLightRequest,\n\
+BCM-BodyCan0:TurnLightControl.RightTurnLightRequest,\n\
+FLCM-BodyCan0:LowBeamLightStatus.LeftLowBeamLightStatus,\n\
 FLCM-BodyCan0:LowBeamLightStatus.RightLowBeamLightStatus"
     );
 }

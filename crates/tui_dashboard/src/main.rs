@@ -428,10 +428,6 @@ fn pane_line_to_ratatui(line: PaneLine) -> Line<'static> {
                     spans.push(Span::styled(ch, style));
                 }
             }
-            SegmentContent::Swatch => {}
-            SegmentContent::Icon(icon) => {
-                spans.push(Span::styled(icon.as_str().to_owned(), segment_style(seg.style)));
-            }
         }
     }
     Line::from(spans)

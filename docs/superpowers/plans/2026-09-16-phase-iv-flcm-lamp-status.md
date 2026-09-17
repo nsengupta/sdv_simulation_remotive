@@ -578,11 +578,11 @@ Require this **five-signal** readiness line (locked order) before expecting Twin
 `PowerOn`:
 
 ```text
-[remotive_bridge] connected; subscribed signals=\
-SCCM-DriverCan0:HazardLightButton.HazardLightButton,\
-BCM-BodyCan0:TurnLightControl.LeftTurnLightRequest,\
-BCM-BodyCan0:TurnLightControl.RightTurnLightRequest,\
-FLCM-BodyCan0:LowBeamLightStatus.LeftLowBeamLightStatus,\
+[remotive_bridge] connected; subscribed signals=
+SCCM-DriverCan0:HazardLightButton.HazardLightButton,
+BCM-BodyCan0:TurnLightControl.LeftTurnLightRequest,
+BCM-BodyCan0:TurnLightControl.RightTurnLightRequest,
+FLCM-BodyCan0:LowBeamLightStatus.LeftLowBeamLightStatus,
 FLCM-BodyCan0:LowBeamLightStatus.RightLowBeamLightStatus
 ```
 
