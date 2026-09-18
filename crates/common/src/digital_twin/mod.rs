@@ -6,7 +6,7 @@
 //!
 //! The pure decision core does not import this module (no `fsm → digital_twin` edge).
 //! Runtime orchestration lives in [`crate::twin_runtime`] (L4). See
-//! `docs/design-notes-pyramid-layers.md`.
+//! Simulation 5 docs (`sdv_simulation_5`).
 
 mod car_behaviour_checker;
 

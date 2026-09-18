@@ -1,13 +1,13 @@
-# Moved — process split complete (Phase 6)
+# Moved — process split complete
 
 Content from this plan is **merged into the livedocs**:
 
 - **Target topology (Gateway vs Dashboard):** [`docs/ARCHITECTURE-OVERVIEW.md`](docs/ARCHITECTURE-OVERVIEW.md) §1
-- **Process split (Done):** [`docs/PLAN.md`](docs/PLAN.md) Phase 6
-- **Design / plan (archived):** [`docs/archive/superpowers/specs/2026-07-19-phase-6-gateway-dashboard-split-design.md`](docs/archive/superpowers/specs/2026-07-19-phase-6-gateway-dashboard-split-design.md),
-  [`docs/archive/superpowers/plans/2026-07-19-phase-6-gateway-dashboard-split.md`](docs/archive/superpowers/plans/2026-07-19-phase-6-gateway-dashboard-split.md)
+- **Process split (Done):** Gateway/Dashboard split — [`docs/ARCHITECTURE-OVERVIEW.md`](docs/ARCHITECTURE-OVERVIEW.md) §2
+- **Design decisions:** [`docs/DESIGN.md`](docs/DESIGN.md)
+- **Remotive observation path:** [`docs/DESIGN-remotive-observation.md`](docs/DESIGN-remotive-observation.md)
 - **TwinRuntimeBuilder / channel ownership:** still valid; see `crates/gateway/src/gateway_runtime.rs`
 
-Live observation: exclusive **UDS** or **peer Zenoh** (Phase 9 Done). File tee always on.
+Live observation: exclusive **UDS** or **peer Zenoh** (Zenoh live link Done). File tee always on.
 
-*Redirect stub — updated 2026-07-20*
+*Redirect stub — updated for Remotive observation docs*

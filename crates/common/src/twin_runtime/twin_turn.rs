@@ -5,6 +5,7 @@
 use std::time::Instant;
 
 use crate::fsm::{DomainAction, FsmEvent, FsmState, StepResult, step};
+use crate::twin_runtime::controller::AssemblyTopology;
 use crate::twin_runtime::detectors::detect_internal_after_hop;
 use crate::twin_runtime::outcome_map::zone_outcomes_to_domain_actions;
 use crate::twin_runtime::zone_replies::ZoneReplies;
@@ -72,6 +73,7 @@ pub fn commit_resolved_turn(
     initial_state: &FsmState,
     initial_ctx: &VehicleContext,
     resolved: ResolvedTurn,
+    assembly_topology: AssemblyTopology,
 ) -> QuiescentResult {
     run_to_quiescence(
         initial_state,
@@ -79,6 +81,7 @@ pub fn commit_resolved_turn(
         &resolved.ingress,
         resolved.now,
         &resolved.zone_replies,
+        assembly_topology,
     )
 }
 
@@ -89,6 +92,7 @@ pub fn run_to_quiescence(
     ingress: &FsmEvent,
     now: Instant,
     zone_replies: &ZoneReplies,
+    assembly_topology: AssemblyTopology,
 ) -> QuiescentResult {
     let mut queue = vec![ingress.clone()];
     let mut state = initial_state.clone();
@@ -110,7 +114,8 @@ pub fn run_to_quiescence(
 
         let result = apply_single_hop(&state, &ctx, &event, now, hop_replies);
 
-        if let Some(internal) = detect_internal_after_hop(&result.next_state, &result.modified_ctx)
+        if let Some(internal) =
+            detect_internal_after_hop(&result.next_state, &result.modified_ctx, assembly_topology)
         {
             queue.push(internal);
         }

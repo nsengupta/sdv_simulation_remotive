@@ -719,6 +719,7 @@ impl VirtualCarActor {
             runtime_state.twin_car.current_state(),
             runtime_state.twin_car.context(),
             resolved,
+            runtime_state.runtime_options.assembly_topology,
         );
         Self::apply_committed_quiescence(runtime_state, quiescent).await
     }

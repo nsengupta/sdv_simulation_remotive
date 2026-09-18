@@ -17,10 +17,19 @@ mod lighting_unsafe;
 
 pub use lighting_unsafe::lighting_unsafe_detector;
 
+use crate::twin_runtime::controller::AssemblyTopology;
+
 /// Run registered detectors against the hop exit cut; first match wins.
+///
+/// ObservedEcus has no headlamp actor and rejects lux, so lighting policy must not run.
+/// Legacy still leaves [`lighting_unsafe_detector`] unregistered (Phase I); do not wire it
+/// here while DrivingDangerously cannot recover in the demo.
 pub fn detect_internal_after_hop(
     _exit_state: &crate::fsm::FsmState,
     _exit_ctx: &crate::vehicle_state::VehicleContext,
+    topology: AssemblyTopology,
 ) -> Option<crate::fsm::FsmEvent> {
-    None
+    match topology {
+        AssemblyTopology::ObservedEcus | AssemblyTopology::Legacy => None,
+    }
 }

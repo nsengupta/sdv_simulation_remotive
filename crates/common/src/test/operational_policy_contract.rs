@@ -9,6 +9,7 @@
 //! **`StartBuzzer`**, latched until corrective action (lamp ON, bright lux, or stationary → Idle).
 
 use crate::fsm::{DomainAction, FsmEvent, FsmState, HeadlampState, Operational};
+use crate::twin_runtime::controller::AssemblyTopology;
 use crate::twin_runtime::{ZoneReplies, run_to_quiescence, twin_turn};
 use crate::vehicle_physics::{FRONT_HEADLAMP_ON_ACK_WAIT, LUX_ON_THRESHOLD, RPM_DRIVING_THRESHOLD};
 use crate::vehicle_state::VehicleContext;
@@ -35,6 +36,7 @@ fn given_driving_in_dark_when_internal_lighting_unsafe_then_l1_unchanged_and_ent
         &FsmEvent::Internal(Operational::LightingUnsafe),
         t0,
         &ZoneReplies::simulate_locally(),
+        AssemblyTopology::ObservedEcus,
     );
 
     assert_eq!(result.hops.len(), 1, "single internal hop only");
@@ -81,6 +83,7 @@ fn given_driving_in_dark_when_on_requested_then_no_lighting_unsafe_internal_hop(
         &FsmEvent::TimerTick,
         t0,
         &ZoneReplies::simulate_locally(),
+        AssemblyTopology::ObservedEcus,
     );
 
     assert_eq!(
@@ -126,6 +129,7 @@ fn given_driving_in_dark_when_on_request_times_out_then_phase_one_stays_driving(
         &FsmEvent::TimerTick,
         t0 + FRONT_HEADLAMP_ON_ACK_WAIT,
         &ZoneReplies::simulate_locally(),
+        AssemblyTopology::ObservedEcus,
     );
 
     assert_eq!(result.hops.len(), 1);

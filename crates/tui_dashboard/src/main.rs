@@ -7,7 +7,7 @@ mod view;
 
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use common::observation_records::diagnostic::elapsed_since_session;
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal::{
@@ -15,8 +15,8 @@ use crossterm::terminal::{
 };
 use crossterm::ExecutableCommand;
 use observation::{
-    AnyLiveSource, LiveMessage, LiveRecordDto, LiveStream, UdsLiveSource, ZenohLiveSource,
-    diagnostic_from_envelope, ledger_from_envelope,
+    diagnostic_from_envelope, ledger_from_envelope, AnyLiveSource, LiveMessage, LiveRecordDto,
+    LiveStream, UdsLiveSource, ZenohLiveSource,
 };
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
@@ -36,7 +36,9 @@ type DashboardTerminal = Terminal<ratatui::backend::CrosstermBackend<std::io::St
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 enum ConnectionStatus {
-    Connected { detail: String },
+    Connected {
+        detail: String,
+    },
     #[default]
     Disconnected,
 }
@@ -157,7 +159,7 @@ async fn require_boot_from_source(
                 if matches!(record.kind, DiagnosticKind::Boot) {
                     return Ok(record);
                 }
- // Non-boot diagnostics before boot are unexpected; keep waiting.
+                // Non-boot diagnostics before boot are unexpected; keep waiting.
             }
             Ok(Ok(Some(_))) => continue,
             Ok(Ok(None)) => bail!("live link closed before boot diagnostic"),
@@ -446,6 +448,7 @@ fn segment_style(token: SegmentStyle) -> Style {
 
 fn format_published_state(state: &PublishedFsmState) -> String {
     match state {
+        PublishedFsmState::Idle => "Cruise".to_owned(),
         PublishedFsmState::ExtremeOperationWarning { .. } => "ExtremeOpWarn".to_owned(),
         other => format!("{other:?}"),
     }
@@ -529,13 +532,13 @@ fn format_unix_timestamp_short(timestamp: UnixTimestamp) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::DiagnosticLevel;
     use common::facade::{PublishedDomainAction, PublishedFsmEvent};
-    use observation::schema::CURRENT_SCHEMA_VERSION;
+    use common::DiagnosticLevel;
     use observation::schema::v1::{
         DiagnosticKindV1, DiagnosticLevelV1, DiagnosticPayloadV1, RunId, StreamEnvelopeV1,
         UnixTimestampV1,
     };
+    use observation::schema::CURRENT_SCHEMA_VERSION;
     use observation::{LiveMessage, LiveSink, MemoryLiveLink, MemoryLiveSource};
 
     const MAX_PANEL_LINE_CHARS: usize = 72;
@@ -610,6 +613,25 @@ mod tests {
         };
         let line = format_status_line(&None, &Some(row));
         assert!(line.contains("FSM: Driving"));
+    }
+
+    #[test]
+    fn status_line_labels_idle_as_cruise() {
+        let row = PublishedTransitionRecord {
+            car_identity: "x".into(),
+            session_started_at: UnixTimestamp::from_duration_since_epoch(Duration::from_nanos(1)),
+            record_seq: 3,
+            recorded_at: UnixTimestamp::from_duration_since_epoch(Duration::ZERO),
+            event: PublishedFsmEvent::PowerOn,
+            old_state: PublishedFsmState::PreparingToStart,
+            next_state: PublishedFsmState::Idle,
+            old_ctx: empty_published_ctx(),
+            current_ctx: empty_published_ctx(),
+            actions: vec![],
+        };
+        let line = format_status_line(&None, &Some(row));
+        assert!(line.contains("FSM: Cruise"), "{line}");
+        assert!(!line.contains("Idle"), "{line}");
     }
 
     #[test]
@@ -693,7 +715,10 @@ mod tests {
             recorded_at: previous.recorded_at,
         };
         apply_diagnostic(tick, &mut state);
-        assert_eq!(state.latest_diagnostic.as_ref().unwrap().kind, previous.kind);
+        assert_eq!(
+            state.latest_diagnostic.as_ref().unwrap().kind,
+            previous.kind
+        );
     }
 
     #[test]
@@ -715,7 +740,8 @@ mod tests {
             ..DashboardState::default()
         };
 
-        sink.emit(&LiveMessage::hello(VIRTUAL_CAR_IDENTITY)).unwrap();
+        sink.emit(&LiveMessage::hello(VIRTUAL_CAR_IDENTITY))
+            .unwrap();
         let boot_env = StreamEnvelopeV1 {
             schema_version: CURRENT_SCHEMA_VERSION,
             run_id: RunId::parse("00000000-0000-4000-8000-000000000001").unwrap(),
@@ -731,7 +757,7 @@ mod tests {
         sink.emit(&LiveMessage::diagnostic_event(boot_env)).unwrap();
         sink.finish().unwrap();
 
- // Consume hello (connection already set), then boot event.
+        // Consume hello (connection already set), then boot event.
         let _hello = observation::LiveSource::recv_blocking(&mut source)
             .unwrap()
             .unwrap();
@@ -819,7 +845,10 @@ mod tests {
             engineer_text.contains("BCM: Ready  Left ON  Right OFF"),
             "{engineer_text}"
         );
-        assert!(ledger_text.contains("HazardButtonObserved(true)"), "{ledger_text}");
+        assert!(
+            ledger_text.contains("HazardButtonObserved(true)"),
+            "{ledger_text}"
+        );
         assert!(ledger_text.contains("SCCM Hazard=ON"), "{ledger_text}");
         assert!(ledger_text.contains("BCM Ready"), "{ledger_text}");
     }

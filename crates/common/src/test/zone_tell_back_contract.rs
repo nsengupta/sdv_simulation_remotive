@@ -3,6 +3,7 @@
 use crate::fsm::DomainAction;
 use crate::fsm::{FsmEvent, FsmState};
 use crate::twin_runtime::constants::ZONE_TELL_BACK_MAX_RETRIES;
+use crate::twin_runtime::controller::AssemblyTopology;
 use crate::twin_runtime::zone_tell_back::{
     TellBackTimeoutOutcome, TellBackWait, on_tell_back_timeout,
     synthetic_unresponsive_headlamp_reply,
@@ -52,6 +53,7 @@ fn synthetic_unresponsive_embed_surfaces_log_warning_on_commit() {
                 crate::digital_twin::ZoneReply::Headlamp(synthetic),
             ),
         },
+        AssemblyTopology::Legacy,
     );
     assert!(
         quiescent.merged_actions().iter().any(|a| {

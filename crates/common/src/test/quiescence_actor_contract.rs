@@ -9,6 +9,7 @@ use crate::fsm::{DomainAction, FsmEvent, FsmState, HeadlampState, Operational};
 use crate::observation_records::transition::{PublishedFsmEvent, PublishedFsmState};
 use crate::test::ActorGuard;
 use crate::test::power_on_to_idle;
+use crate::twin_runtime::controller::AssemblyTopology;
 use crate::twin_runtime::controller::vehicle_controller::VehicleControllerRuntimeOptions;
 use crate::twin_runtime::{ResolvedTurn, ZoneReplies, commit_resolved_turn};
 use crate::vehicle_physics::{FRONT_HEADLAMP_ON_ACK_WAIT, RPM_DRIVING_THRESHOLD};
@@ -38,6 +39,7 @@ fn given_driving_on_requested_in_dark_when_commit_resolved_turn_then_phase_one_s
             now: t0 + FRONT_HEADLAMP_ON_ACK_WAIT,
             zone_replies: ZoneReplies::simulate_locally(),
         },
+        AssemblyTopology::Legacy,
     );
 
     assert_eq!(quiescent.hops.len(), 1);
@@ -66,6 +68,7 @@ fn given_driving_in_dark_when_commit_resolved_turn_without_zone_reply_then_singl
             now: t0,
             zone_replies: ZoneReplies::simulate_locally(),
         },
+        AssemblyTopology::Legacy,
     );
 
     assert_eq!(quiescent.hops.len(), 1);

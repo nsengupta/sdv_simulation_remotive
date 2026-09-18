@@ -1,327 +1,269 @@
-# SDV Simulation 5 — Multi-process observation & Dashboard
+# SDV Simulation — Remotive Topology interacting with Car's Digital Twin
+
+A Rust Digital Twin that **watches** a RemotiveCar Hello World vehicle in real
+time—and catches lamp-ECU faults the 3D “cute car” never sees.
+
+| | |
+|---|---|
+| **This repo** | [`sdv_simulation_remotive`](https://github.com/nsengupta/sdv_simulation_remotive) |
+| **Capstone Twin (Simulation 5)** | [`sdv_simulation_5`](https://github.com/nsengupta/sdv_simulation_5) |
+| **Capstone blog** | [Prototype SDV — milestone 1](https://nsengupta.github.io/blog/prototype-software-defined-vehicle-milestone-1/) |
+| **Remotive examples** | [`remotivelabs-topology-examples`](https://github.com/remotivelabs/remotivelabs-topology-examples) |
+| **Remotive demo branch** | `demo/flcm-lamp-status-feedback` (PR offered upstream) |
 
 ---
 
-↩️ This repo is **Iteration 5** of a software-defined-vehicle (#SDV) prototype. Each iteration
-**grows on its predecessor** — reusing and refactoring what still fits, and changing structure
-where the next goal requires it.
+## Start here (about two minutes)
 
-:bookmark: For a summary (capstone 1.0) of all the phases we have done so far, read [here](https://nsengupta.github.io/blog/prototype-software-defined-vehicle-milestone-1/). This phase builds upon the the preceding phases.
+**If you came from the blog** (product / narrative lens), read in this order:
 
-| Iteration | Repository | Focus |
-| --------- | ---------- | ----- |
-| 1 | [`sdv_simulation_1`](https://github.com/nsengupta/sdv_simulation_1) | First working CAN control loop |
-| 2 | [`sdv_simulation_2`](https://github.com/nsengupta/sdv_simulation_2) | Zone contexts, transition ledger, diagnostics |
-| 3 | [`sdv_simulation_3`](https://github.com/nsengupta/sdv_simulation_3) | Headlamp twinlet, quiescent commit |
-| 4 | [`sdv_simulation_4`](https://github.com/nsengupta/sdv_simulation_4) | Brain FSM redesign, ROB, Wiper twinlet |
-| **5** | **`sdv_simulation_5` (this repo)** | **Gateway/Dashboard split, observation files + live UDS\|Zenoh, Dashboard presentation, weather/wiper on ledger** |
+1. [Objective](#objective)
+2. [What this proves](#what-this-proves) — including the demo punchline
+3. [Why the Twin bridge?](#why-the-twin-bridge-component-name-remotive_bridge)
+4. [Intentionally left out](#intentionally-left-out)
 
-Iteration 4 twin / ROB design (still the coordination core):  
-[`docs/archive/DESIGN-iteration-4.md`](docs/archive/DESIGN-iteration-4.md).
+**If you are evaluating the engineering** (architecture / risk lens), these may be useful:
 
----
-
-## What this repository contains
-
-A **multi-process SDV prototype** on Linux CAN (`vcan0`):
-
-| Process | Crate | Owns |
-|---------|-------|------|
-| Gateway | `gateway` | Digital twin, CAN ingress, actuation, observation file tee, optional live publish |
-| Dashboard | `tui_dashboard` | Observation-only TUI (driver / engineer / ledger tail) |
-| Emulator | `emulator` | Finite or Ctrl+C CAN lifecycle + RPM / lux / rain |
-| Actuators | `front_headlamp_actuator`, `wiper_actuator` | CMD responses on CAN |
-
-Shared library: `common` (twin, FSM, published records). Persistence / live wire: `observation`
-(schema **v3** JSON envelopes).
-
-**This README is the source of truth** for what the repo is and how to run it. Narrative /
-blog drafts live under [`blog-inputs/`](blog-inputs/) and are accompanying text only.
+5. [How the pieces fit](#how-the-pieces-fit)
+6. [What we changed](#what-we-changed)
+7. [Deeper reading](#deeper-reading) for design contracts and run steps
+8. [How to run](#how-to-run).
 
 ---
 
-## What Iteration 5 added (over 4)
+## Objective
 
-1. **Gateway** 
-    * Owns the Digital Twin (Actors/FSM/Diagnostic Emitter/Transition Ledger Emitter)
-    * Connects to either a Unix Domain Socket or a Zenoh peer (based on a command-line parameter), using a given Key-Expression and 
-      emits records
-    * Stores the Ledger in local files as well ( _tee_ mechanism ); readiness for 'replaying 
-      logs facility' in future simulations
-2. **Dashboard**
-   * #ratatui-based TUI application; having separate panes for displaying Diagnostics, 
-     Transition and Ledger-stream
-   * Works as the Observation console
-2. **Observation capture and emission**
-    * Dashboard uses versioned `manifest.json` + `diagnostic.jsonl` + `ledger.jsonl` emitted by 
-      Gatway; transportation takes place through Unix Domain Socket or Zenoh (peer mode)
-    * Dashboard displays the records captured, _live_ 
-    * Dashboard panes present Speed Bar, weather/wiper/visibility glyphs, Transition Ledgers
-    * Diagnostics pane is meant for Drivers; Transition Ledger is meant for Engineers, watching 
-      behaviour of the Digital Twin
-3. **Controlled CAN data generation by emulator**
-    * Can emit N records (`--readings`); optional `--tick-ms` (default 100) slows ticks for demos
-    * Ensures that Digital Twin receives a `PowerOn` before any emulated CAN message and a `PowerOff` as 
-      the last emulated CAN message
+This exercise shows that we can:
 
-Roadmap and deferred gaps: [`docs/PLAN.md`](docs/PLAN.md).  
-Design decisions (this simulation): [`docs/DESIGN.md`](docs/DESIGN.md).  
-Topology / gap register: [`docs/ARCHITECTURE-OVERVIEW.md`](docs/ARCHITECTURE-OVERVIEW.md).
+- Attach a **Rust Digital Twin** to a live **Remotive** vehicle topology (a _Twin-Bridge_ , see 
+  below)
+- Observe driver and ECU signals **in real time** (hazard, turn requests, front
+  low-beam *status*).
+- Detect when the front-lamp ECU reports **Fail**, or goes **silent** (stops
+  publishing status).
+- Warn on a Twin dashboard **without** rewriting Remotive’s BCM logic or the
+  3D car’s visuals.
+- Keep Remotive as the **authoritative vehicle model**, and the Twin as the
+  **authoritative observer** of selected signals and faults.
 
 ---
 
-## How to run (manual smoke)
+## Why the Twin bridge (component name: `remotive_bridge`)?
 
-```bash
-# Terminals — start actuators, then Gateway, then Dashboard, then emulator:
-cargo run -p front_headlamp_actuator
-cargo run -p wiper_actuator
-cargo run -p gateway -- --uds observation.sock
-cargo run -p tui_dashboard -- --uds observation.sock
-EMULATOR_TUNNEL_PROB=0.01 EMULATOR_RAIN_PROB=0.008 \
-  cargo run -p emulator -- --readings 30
+Remotive's **Hello World** topology already runs alongside a **RemotiveBroker**—a signal hub that
+carries Jupyter inputs and ECU outputs as named values over gRPC. That hub ships
+with Remotive’s topology; we are just making use of its facilities.
 
-# Optional: slow ticks for demos (default --tick-ms 100):
-#   cargo run -p emulator -- --readings 30 --tick-ms 400
-```
+What *we* added is **`remotive_bridge`**: a small Rust process on the Twin side
+of that hub. It has a **dual role**.
 
-UDS paths resolve under `<cwd>/tmp/` (e.g. `./tmp/observation.sock`).
+1. **Translate Remotive → Twin.**  
+   It uses RemotiveBroker (via `remotivelabs-broker`) to subscribe to selected
+   signals—hazard, turn requests, FLCM low-beam status—and maps them onto Twin
+   SocketCAN carriers (`0x105`–`0x109`). Remotive keeps speaking Remotive; the
+   Twin keeps speaking its own CAN vocabulary.
 
-**Zenoh peer** (instead of UDS):
-
-```bash
-cargo run -p gateway -- --zenoh --keyexpr sdv/twin/observation
-cargo run -p tui_dashboard -- --zenoh --keyexpr sdv/twin/observation
-```
-
-**Headless capture** (files only): `cargo run -p gateway -- --no-live`  
-Runs land under `./observations/<run-id>/`.
-
-Smoke scripts: `scripts/smoke-two-process.sh`, `scripts/smoke-zenoh-peer.sh`.
-
----
-
-## Architecture (short)
+2. **Replace the capstone emulator for this demo.**  
+   In [Simulation 5](https://github.com/nsengupta/sdv_simulation_5), a separate
+   **emulator** drove Twin lifecycle and motion on CAN (`PowerOn`, RPM,
+   `PowerOff`). The Twin FSM is sensitive to that order. Remotive does not emit
+   those Twin-specific frames, so the bridge **also generates** them—so Gateway
+   can start, idle, and stop without the old emulator process.
 
 ```text
-Emulator ──CAN──► Gateway (twin + ObservationTee) ──files──► ./observations/<run-id>/
-                      │
-                      ├── live UDS or Zenoh ──► Dashboard (TUI)
-                      └── CAN CMD ◄──► Headlamp / Wiper actuators
+  Operator / Jupyter / 3D car
+            │
+            ▼
+      RemotiveBroker          (already in Remotive topology)
+            │
+            ├──► Remotive ECUs (BCM, FLCM, …)
+            └──► remotive_bridge ──┬── (A) translated ECU signals
+                                   │      hazard / turns / FLCM status
+                                   │      → Twin CAN 0x105–0x109
+                                   │
+                                   └── (B) Twin session frames
+                                          PowerOn / RPM / PowerOff
+                                          (emulator role)
+                                            │
+                                    ┌───────┴───────┐
+                                    ▼               ▼
+                              Gateway Twin     (same vcan0)
+                                    │
+                                    ├── child actors (SCCM, BCM, FLCM, …)
+                                    ├── brain FSM (coordinates + PowerOn/Off)
+                                    └── observation → TUI
 ```
+
+Both (A) and (B) arrive on the Twin’s CAN interface. The Gateway does not see
+“broker messages”—it sees **two kinds of Twin CAN input** from the bridge:
+observed ECU traffic, and the lifecycle/motion frames that used to come from
+the capstone emulator.
+
+The broker is the **shared signal bus** Remotive already provides. The bridge is
+**why the Twin can attach** without scraping containers or teaching Gateway to
+speak gRPC.
+
+---
+
+## What this proves
+
+| Claim | In practice |
+|-------|-------------|
+| Broker → Rust is a clean seam | `remotive_bridge` subscribes over gRPC and stays connected while the topology runs |
+| Selected signals reach Twin state | Hazard, turn requests, and FLCM low-beam status appear as Twin context |
+| Two views of the same car | Jupyter / 3D car *and* the TUI stay coherent on hazard and turns |
+| Hazard stays readable after a pulse | A short Restbus “press” still leaves TUI **Hazard: ON** (see note below) |
+| FLCM health is Twin-visible | Ok / Fail on attended low-beam rows; Warning on the Notice line |
+| **FLCM silence** is a fault | If FLCM stops publishing low-beam **status** for **~500 ms**, the Twin warns and marks status stale |
+| Cute car can look healthy while Twin warns | Low beams stay ON from BCM *requests* even when FLCM Fail / Silent |
+| Twin does not drive Remotive | No Twin→broker publish on this path |
+| There is a durable trail | Versioned observation files + live UDS (or Zenoh) |
+
+> **Note — hazard latch.** Remotive’s hazard button on the bus is often a
+> *momentary* pulse. Drivers expect “hazards are on” until they press again.
+> The Twin therefore latches an internal **hazard mode** from rising edges of
+> the button signal, so the TUI (and the story) match that expectation while
+> the 3D car still blinks from BCM.
+
+### Demo punchline (verified live)
+
+With Jupyter buttons **FLCM Ok | Fail | Silent** and Hazard `!`:
+
+1. Light stalk       → **Low Beam** → cute car ON; TUI low beams OK  
+2. **FLCM Fail**     → TUI Warning + FAIL; cute car **still ON**  
+3. **FLCM Ok**       → Warning clears  
+4. **FLCM Silent**   → within ~500 ms Warning / stale; cute car **still ON**  
+5. **FLCM Ok**       → healthy again  
+6. Hazard **`!`**    → cute car blinks; TUI Hazard ON (latched)
+
+### Why that contrast matters
+
+> **The Twin is a real twin — not a mirror of the webpage.**
+>
+> It keeps tab on what ECUs are saying on the car’s bus, not only on what the
+> physical (or 3D) manifestation paints. The cute car can still look bright from
+> BCM *requests* while FLCM has already failed or gone silent. The Twin holds
+> the **global, summated state** of the vehicle from those observations, and
+> the _Warning_ is that summary speaking.
+> 
+> In a way, that's the **main objective of this exercise**.
+> 
+
+---
+
+## How the pieces fit
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant E as Emulator
-    participant HL as Headlamp actuator
-    participant WP as Wiper actuator
-    participant G as Gateway (twin + tee)
-    participant D as Dashboard
-    participant Disk as ./observations/<run-id>/
+    actor Op as Operator
+    participant JY as Jupyter
+    participant HW as Remotive Hello World
+    participant BR as RemotiveBroker
+    participant RB as remotive_bridge
+    participant GW as Gateway Twin
+    participant TUI as TUI Dashboard
 
-    Note over HL,WP: Start first — listen on vcan0
-    HL-->>HL: listen CMD
-    WP-->>WP: listen CMD
-
-    Note over G,D: Live link before twin install
-    G->>G: bind UDS or open Zenoh
-    G-->>D: wait for Dashboard
-    D->>G: connect (UDS accept / Zenoh subscribe)
-    G->>G: install twin, emit boot diagnostic
-    G->>Disk: tee boot (+ later records)
-    G->>D: live boot (+ later records)
-
-    Note over E,G: Finite session on CAN (vcan0)
-    E->>G: CAN 0x100 PowerOn
-    loop readings (RPM / lux / rain)
-        E->>G: CAN sensor frames
-        G->>G: FSM / ROB / assemblies
-        opt headlamp needed
-            G->>HL: CAN CMD
-            HL-->>G: CAN response
-        end
-        opt wiper needed
-            G->>WP: CAN CMD
-            WP-->>G: CAN response
-        end
-        G->>Disk: tee diagnostic + ledger
-        G->>D: live diagnostic + ledger
-        D->>D: update Driver / Engineer panes
-    end
-    E->>G: CAN 0x100 PowerOff
-    G->>Disk: tee final records
-    G->>D: live final records
+    Op->>JY: Stalk / Hazard / FLCM Ok·Fail·Silent
+    JY->>BR: Update signals / control API
+    BR->>HW: ECU + 3D car updates
+    HW-->>BR: FLCM status every 50 ms (when healthy)
+    RB->>BR: Subscribe (five signals)
+    BR-->>RB: Hazard, turns, FLCM status
+    RB->>GW: (A) observed carriers 0x105–0x109
+    RB->>GW: (B) PowerOn / RPM / PowerOff
+    Note over RB,GW: Same vcan0: translated Remotive signals<br/>plus Twin session frames (emulator role)
+    GW->>TUI: Live observation (UDS)
+    TUI-->>Op: Hazard, lights, low-beam health, Warnings
 ```
 
-- Library pyramid L0–L6: `common` is acyclic; Gateway/Dashboard import `common::facade` only
-  for twin types. Detail: [`docs/design-notes-pyramid-layers.md`](docs/design-notes-pyramid-layers.md).
-- Observation schema mirrors **published** Rust structs (currently **v3**: weather + wiper +
-  real rain events).
-- Twin still uses the Iteration-4 **ROB** (`barrier_queue`) and PreparingToStart/Stop lifecycle
-  — see archived Iter 4 design and [`diagrams/`](diagrams/).
+We treat RemotiveBroker as the **shared signal bus** Remotive already provides.
+The Twin attaches beside the vehicle model—it does not replace Remotive’s ECUs,
+and it does not reach into their containers.
+
+### Actors and the brain FSM
+
+Inside Gateway, the Digital Twin is an **actor tree**:
+
+- **Child actors** hold the current observed state of individual ECUs / domains
+  (for this demo: SCCM, BCM, FLCM, and related contexts).
+- A **brain FSM** coordinates those actors and applies superseding lifecycle
+  signals such as **PowerOn** / **PowerOff** (and motion via RPM) so the twin
+  session starts, runs, and stops in a coherent order.
+
+That is why the bridge’s dual role matters: without ordered session frames,
+the FSM never enters a state where ECU observations can accumulate into the
+global twin view the TUI shows.
 
 ---
 
-## Assembly actors (L1 state transitions)
+## What we changed
 
-Both assemblies are peers in the Brain (ROB, tell-back, PreparingToStart/Stop). Headlamp uses
-hardware ACK on lux-driven on/off; Wiper is fire-and-forget on rain Start/Stop. Lifecycle
-`BecomeOff` is **deliberately incomplete** on both: jump to `Off` with no physical stop CMD
-(`RequestOff` / `StopWiping`). Source of truth: `crates/common/src/vehicle_state/{front_headlamp,wiper}.rs`.
+### On Remotive (`demo/flcm-lamp-status-feedback`, PR offered upstream)
 
-### Headlamp
+| Change | Why |
+|--------|-----|
+| DBC `LowBeamLightStatus` from FLCM (50 ms, Ok/Fail) | Give the lamp ECU a voice |
+| Small FLCM stub + `flcm_fault` (`ok` / `fail` / `silent`) | Cyclic status + demo inject |
+| Hello World wires that stub (no empty `FLCM: {}`) | Status actually appears on the broker |
+| Jupyter **FLCM Ok / Fail / Silent** | Operators can run the punchline without scripts |
 
-```text
-Lifecycle (Brain Actor issues StartAssemblies / StopAssemblies):
+BCM beam policy and the cute-car mapping stay on **BCM requests**—on purpose.
 
-                   BecomeOn
-         Off ──────────────────► Ready
-          ▲                        │
-          │                        │ BecomeOff (any → Off;
-          └────────────────────────┘  no RequestOff)
+### In this Twin repo
 
-Operational (lux + hardware ACK — assembly stays “up”):
-
-  Ready ──lux≤ON──► OnRequested ──AckOn──► On
-    ▲                   │                   │
-    │                   │ incomplete/       │ lux≥OFF
-    │                   │ timeout           ▼
-    │                   |         OffRequested ──AckOff──► Ready
-    │───────────────────┘                       │
-    │                                           │ incomplete/timeout
-    └───────────────────────────────────────────┘ (back to On)
-```
-
-### Wiper
-
-```text
-                   BecomeOn
-         Off ──────────────────► Ready ─────── Start ───────► Running
-          ▲                        │  ▲                          │
-          │                        │  └──────── Stop ────────────┘
-          │                        │              (RainsStopped) │
-          │                        │                             │
-          └──── BecomeOff ─────────┴────── BecomeOff ────────────┘
-                (any → Off;                (any → Off;
-                 no StopWiping)             no StopWiping)
-
-Operational Start/Stop emit StartWiping/StopWiping (→ CAN CMD, no ACK).
-```
+| Piece | Role                                                                                                                                                                                                   |
+|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `remotive_bridge` | Dual role: translate RemotiveBroker signals → Twin CAN, and replace the capstone emulator’s PowerOn / RPM / PowerOff (see [Why the Twin bridge?](#why-the-twin-bridge-component-name-remotive_bridge)) |
+| Twin actor tree + brain FSM | Child actors track ECU/domain state; the Brain actor - along with the FSM - coordinates them and lifecycle                                                                                             |
+| Twin `FlcmContext` + silence watchdog | Treats missing FLCM **status** traffic (after first sighting) as a fault                                                                                                                               |
+| Observation schema **v8** | Publishes FLCM health and events for TUI and files                                                                                                                                                     |
+| TUI | Front Light (L)/(R), Low Beam (L)/(R), Warning Notice                                                                                                                                                  |
 
 ---
 
-## Dashboard reflects the Twin
+## Intentionally left out
 
-The Dashboard is observation-only: every pane is driven by what the Twin publishes
-(diagnostics + ledger), not by a parallel UI model. The same surfaces show the Twin
-**just after start** and **after PowerOff** — only the published state changes.
-
-### At start (Twin Idle after PowerOn)
-
-Session / Driver / Engineer / ledger all agree: FSM `Idle`, assemblies `Ready`, boot notice,
-ledger through PreparingToStart → Idle.
-
-![Dashboard at start — Twin Idle after PowerOn](diagrams/dashboard-at-start.png)
-
-### Live (mid-session)
-
-![Dashboard live during a finite emulator session](assets/dashboard-live.gif)
-
-### At end (Twin Off after PowerOff)
-
-Same layout; Twin has shut down: FSM `Off`, Headlamp/Wiper `Off`, ledger ends PreparingToStop →
-SwitchedOff. Weather/wiper glyphs still come from the last published context.
-
-![Dashboard at end — Twin Off after PowerOff](diagrams/dashboard-at-end.png)
+- The Twin does **not** publish commands back into RemotiveBroker.
+- BCM, GWM, and the cute car are **not** taught to consume FLCM status.
+- Headlamp ACK/NACK machinery is **not** reused for FLCM Fail or silence.
+- The legacy emulator and headlamp/wiper actuator binaries are **not** required
+  for the Remotive demo (they remain only for the Simulation 5 CAN path).
+- Richer ECU stories (rear-lamp reply checks, brake E2E timeouts, environment
+  from ECUs, Twin-driven continuous stimulus) are **deferred** on purpose.
 
 ---
 
-## Dashboard surfaces
+## How to run
 
-| Pane | Shows |
-|------|--------|
-| Driver (Diagnostic) | Notice, speed bar, visibility (+ lux glyph), weather/wiper glyphs + text |
-| Engineer | Current state, last event, Headlamp / Wiper assembly context |
-| Ledger tail | Last 20 transition hops (`>` on newest) |
+Full commands and notes:
+[`docs/DESIGN-remotive-observation.md`](docs/DESIGN-remotive-observation.md)
+(§ Operator runbook).
 
----
+**Order:** RemotiveBus → topology build → compose → Gateway → TUI → bridge →
+Jupyter **Restart & Run All**.
 
-## Tests
-
-```bash
-cargo test -p common -p observation -p gateway -p tui_dashboard -p emulator
-```
-
-Contract tests under `crates/common/src/test/`; observation goldens under
-`crates/observation/testdata/golden/v3/`.
+**Stop:** Ctrl+C bridge / Gateway / TUI → compose `down` → stop RemotiveBus.
 
 ---
 
-## Project structure
+## Deeper reading
 
-```text
-sdv_simulation_5/
-├── Cargo.toml                 # Workspace root
-├── README.md
-├── assets/
-│   └── dashboard-live.gif     # README live TUI capture
-├── blog-inputs/               # Stage narratives (accompanying prose)
-├── diagrams/                  # Mermaid + Dashboard start/end screenshots
-├── scripts/
-│   ├── smoke-two-process.sh   # Gateway + UDS + emulator
-│   ├── smoke-zenoh-peer.sh
-│   └── check-gateway-facade-imports.sh
-├── docs/
-│   ├── PLAN.md                # Roadmap + TBDs
-│   ├── DESIGN.md              # Stage 5 decisions
-│   ├── ARCHITECTURE-OVERVIEW.md
-│   ├── TODO-*.md
-│   └── archive/               # Iter 4 DESIGN, detailed PHASES, old specs/plans
-├── observations/              # Runtime capture output (gitignored runs)
-└── crates/
-    ├── common/                # Twin, FSM, ROB, assemblies, published records, facade
-    ├── observation/           # Schema DTOs, RunWriter/Reader, tee, UDS/Zenoh live
-    ├── gateway/               # Twin host, CAN, tee, live publish
-    ├── tui_dashboard/         # Observation-only TUI
-    ├── emulator/              # CAN lifecycle + RPM / lux / rain
-    ├── vehicle_device_bus/    # Headlamp / wiper CAN codecs
-    ├── front_headlamp_actuator/
-    └── wiper_actuator/        # Fire-and-forget motor stand-in
-```
-
-Deeper `common` pyramid (L0–L5): [`docs/design-notes-pyramid-layers.md`](docs/design-notes-pyramid-layers.md), [`docs/project-structure.md`](docs/project-structure.md).
+| Document | Audience |
+|----------|----------|
+| [`docs/DESIGN-remotive-observation.md`](docs/DESIGN-remotive-observation.md) | Contracts, identities, runbook |
+| [`docs/DESIGN.md`](docs/DESIGN.md) | Simulation 5 Gateway / observation core |
+| [`docs/design-documents.md`](docs/design-documents.md) | Catalogue |
+| [Capstone blog](https://nsengupta.github.io/blog/prototype-software-defined-vehicle-milestone-1/) | Why the Twin exists at all |
+| [`sdv_simulation_5`](https://github.com/nsengupta/sdv_simulation_5) | Parent Twin without Remotive |
 
 ---
 
-## Docs map
+## Crates (Remotive path)
 
-| Doc | Role |
-|-----|------|
-| **This README** | What the repo contains; how to run |
-| [`docs/PLAN.md`](docs/PLAN.md) | Roadmap + important TBDs |
-| [`docs/DESIGN.md`](docs/DESIGN.md) | Stage 5 design decisions |
-| [`docs/ARCHITECTURE-OVERVIEW.md`](docs/ARCHITECTURE-OVERVIEW.md) | Topology, gaps, run notes |
-| [`docs/archive/`](docs/archive/) | Historical design notes (Iter 4 twin, agent specs) |
-| [`blog-inputs/`](blog-inputs/) | Narrative drafts (not repo truth) |
-| [`docs/TODO-twin-lifecycle.md`](docs/TODO-twin-lifecycle.md) | Shutdown / disband checklist |
-| [`docs/TODO-simulation-5.md`](docs/TODO-simulation-5.md) | Engineering backlog (actuation, tests, …) |
-
----
-
-## TBD
-
-Major future work (detail in [`docs/PLAN.md`](@/docs/PLAN.md)):
-
-| Item | Compact plan |
-|------|----------------|
-| **Standalone replay** | Dashboard (or a new tool) plays `observations/<run-id>/` without a live Gateway. |
-| **Shutdown / disband** | Quit → Stop → wait `Off` → tear down actors / ingress ([`docs/TODO-twin-lifecycle.md`](docs/TODO-twin-lifecycle.md)). |
-| **Active ROB turns** | Engineer live `N` from `barrier_queue`; emit on queue push/drain (not ledger-hop stamps). |
-| **Visibility `Swatch`** | Colour chips for lux bands (low / hold / bright) instead of unicode boxes alone. |
-| **Notice colours** | Style Notice by `DiagnosticLevel` / kind (labels already cyan). |
-| **Glyph ASCII / motion** | Optional ASCII fallback for weak terminals; optional wiper/weather animation. |
-| **Richer assemblies** | Deeper Headlamp / Wiper twinlet detail once Twin publishes it. |
-| **Headlamp unconfirmed** | Finish / relocate `HeadlampActuationUnconfirmed` (zone tell-back candidate). |
-| **Non-blocking actuation** | Engineering backlog — async CMD path without stalling the twin loop ([`docs/TODO-simulation-5.md`](docs/TODO-simulation-5.md)). |
-| **Zenoh as the router** | Currently, Zenoh is used in _peer_ more; it should be used as a Router |
+| Crate | Role |
+|-------|------|
+| `remotive_bridge` | Broker subscribe → Twin CAN + session lifecycle |
+| `gateway` | Digital Twin; observation tee; live UDS/Zenoh |
+| `tui_dashboard` | Observation-only UI |
+| `common` / `observation` | Twin state + schema v8 envelopes |

@@ -48,7 +48,7 @@ fn subscription_config_rejects_hello_world_signal_widening() {
     assert_eq!(
         ids.len(),
         5,
-        "Phase IV must subscribe hazard, turns, and the two FLCM status signals only"
+        "must subscribe hazard, turns, and the two FLCM status signals only"
     );
     let identities: Vec<(&str, &str)> = ids
         .iter()
@@ -365,7 +365,11 @@ fn cli_defaults_and_overrides_are_emulator_compatible() {
     assert_eq!(defaults.tick, Duration::from_millis(DEFAULT_TICK_MS));
     assert_eq!(defaults.readings, None);
     assert_eq!(defaults.rpm_clamp, DEFAULT_RPM_CLAMP);
-    assert_eq!(defaults.rpm_clamp, common::RPM_DRIVING_THRESHOLD);
+    assert!(
+        defaults.rpm_clamp > common::RPM_DRIVING_THRESHOLD,
+        "default clamp must allow Driving (rpm > {})",
+        common::RPM_DRIVING_THRESHOLD
+    );
 
     let args = parse_args([
         "--broker-url",
@@ -406,7 +410,12 @@ async fn observation_rpm_stays_at_or_below_configured_clamp() {
             rpm <= DEFAULT_RPM_CLAMP,
             "default clamp must keep rpm ≤ {DEFAULT_RPM_CLAMP}, got {rpm}"
         );
-        assert!(rpm >= common::RPM_IDLE);
+        assert!(rpm > common::RPM_DRIVING_THRESHOLD);
+        assert!(
+            common::calculate_speed_from_rpm(rpm)
+                <= f64::from(common::SPEED_EXTREME_OPERATION_THRESHOLD_KPH),
+            "cruise rpm {rpm} must stay at or under the 160 km/h warning line"
+        );
     }
 }
 

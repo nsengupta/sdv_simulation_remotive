@@ -1,9 +1,11 @@
 # Design — SDV Simulation 5
 
-**Livedoc** for process/observation/Dashboard decisions in this simulation.  
-Twin brain / ROB / assembly FSM detail: [`archive/DESIGN-iteration-4.md`](archive/DESIGN-iteration-4.md).  
-Topology and run order: [`ARCHITECTURE-OVERVIEW.md`](ARCHITECTURE-OVERVIEW.md).  
+**Livedoc** for process/observation/Dashboard decisions in this simulation.
+Remotive Hello World observation design and runbook:
+[`DESIGN-remotive-observation.md`](DESIGN-remotive-observation.md).
+Topology and run order: [`ARCHITECTURE-OVERVIEW.md`](ARCHITECTURE-OVERVIEW.md).
 Roadmap + deferred TBDs: [`PLAN.md`](PLAN.md).
+Catalogue: [`design-documents.md`](design-documents.md).
 
 ## Problem this simulation solves
 
@@ -34,7 +36,7 @@ prototype **operable as separate processes** with a durable observation trail:
 - **Wide streams, selective collectors** — emit rich facts; UI filters. Do not thin the Twin
   to one pane’s needs.
 - **Common published structs are source of truth** — observation JSON mirrors published Rust
-  types field-for-field (`schema_version` currently **3**).
+  types field-for-field (observation schema is versioned; currently **v8** on the Remotive path).
 - Presentation (glyphs, colours, labels) is **receiver-side** only.
 
 ### Weather and wiper on Dashboard
@@ -64,7 +66,7 @@ shutdown/disband).
 | `emulator` | CAN lifecycle + telemetry producer (`--readings`, `--tick-ms`) |
 | `front_headlamp_actuator` / `wiper_actuator` | Hardware-facing actuators on CAN |
 
-## Archive
+## Related documents
 
-Per-phase designs and plans that informed this livedoc:
-[`archive/superpowers/`](archive/superpowers/).
+- Remotive path: [`DESIGN-remotive-observation.md`](DESIGN-remotive-observation.md)
+- Catalogue: [`design-documents.md`](design-documents.md)

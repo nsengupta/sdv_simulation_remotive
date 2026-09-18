@@ -2,7 +2,7 @@
 //!
 //! Gateway and other edge processes must depend on this module only — not on
 //! [`crate::fsm`], [`crate::twin_runtime`], or other internal modules directly.
-//! See `docs/design-notes-pyramid-layers.md`.
+//! Library pyramid: see Simulation 5 docs (`sdv_simulation_5`).
 
 // --- Controller (composition root / single doorway) ---
 

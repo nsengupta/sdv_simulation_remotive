@@ -1,4 +1,4 @@
-use super::{LineRole, PaneLine, format_low_beam_status};
+use super::{format_low_beam_status, LineRole, PaneLine};
 use common::facade::{
     PublishedBcmState, PublishedFsmEvent, PublishedFsmState, PublishedObservedBool,
     PublishedTransitionRecord,
@@ -93,9 +93,8 @@ pub fn engineer_pane(ledger: Option<&PublishedTransitionRecord>, width: usize) -
 
 fn format_state(state: &PublishedFsmState) -> String {
     match state {
-        PublishedFsmState::ExtremeOperationWarning { .. } => {
-            "Extreme operation warning".to_owned()
-        }
+        PublishedFsmState::Idle => "Cruise".to_owned(),
+        PublishedFsmState::ExtremeOperationWarning { .. } => "Extreme operation warning".to_owned(),
         other => format!("{other:?}"),
     }
 }
@@ -142,11 +141,11 @@ fn format_bcm_state(state: PublishedBcmState) -> &'static str {
 mod tests {
     use super::*;
     use common::facade::{
-        PublishedBcmContext, PublishedFlcmContext, PublishedHeadlampContext, PublishedHeadlampState,
-        PublishedHealthContext, PublishedPowertrainContext, PublishedSccmContext,
-        PublishedVehicleContext,
-        PublishedVisibilityContext, PublishedWeatherContext, PublishedWheelRpm,
-        PublishedWiperContext, PublishedWiperState, UnixTimestamp,
+        PublishedBcmContext, PublishedFlcmContext, PublishedHeadlampContext,
+        PublishedHeadlampState, PublishedHealthContext, PublishedPowertrainContext,
+        PublishedSccmContext, PublishedVehicleContext, PublishedVisibilityContext,
+        PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
+        UnixTimestamp,
     };
     use std::time::Duration;
 
@@ -204,11 +203,25 @@ mod tests {
     }
 
     #[test]
+    fn engineer_labels_idle_as_cruise() {
+        let mut row = sample_ledger();
+        row.next_state = PublishedFsmState::Idle;
+        let pane = engineer_pane(Some(&row), 40);
+        assert!(pane.lines[0].text().contains("Current state: Cruise"));
+        assert!(!pane.lines[0].text().contains("Idle"));
+    }
+
+    #[test]
     fn engineer_shows_state_and_partial_assemblies() {
         let pane = engineer_pane(Some(&sample_ledger()), 40);
         assert!(pane.lines[0].text().contains("Current state: Driving"));
-        assert!(pane.lines[1].text().contains("Last event: UpdateAmbientLux"));
-        assert!(pane.lines.iter().any(|l| l.text().contains("SCCM: Hazard UNKNOWN")));
+        assert!(pane.lines[1]
+            .text()
+            .contains("Last event: UpdateAmbientLux"));
+        assert!(pane
+            .lines
+            .iter()
+            .any(|l| l.text().contains("SCCM: Hazard UNKNOWN")));
         assert!(pane.lines.iter().any(|l| l.text().contains("BCM: Off")));
         assert!(!pane.lines.iter().any(|l| l.text().contains("Headlamp:")));
         assert!(!pane.lines.iter().any(|l| l.text().contains("Wiper:")));
@@ -243,7 +256,10 @@ mod tests {
     fn engineer_shows_sccm_bcm_readiness_and_unknown_latest_values() {
         let text = pane_text(&engineer_pane(Some(&sample_ledger()), 64));
         assert!(text.contains("SCCM: Hazard UNKNOWN"), "{text}");
-        assert!(text.contains("BCM: Off  Left UNKNOWN  Right UNKNOWN"), "{text}");
+        assert!(
+            text.contains("BCM: Off  Left UNKNOWN  Right UNKNOWN"),
+            "{text}"
+        );
         assert!(text.contains("Low beam L: UNKNOWN"), "{text}");
         assert!(text.contains("Low beam R: UNKNOWN"), "{text}");
         assert!(!text.contains("Headlamp:"), "{text}");

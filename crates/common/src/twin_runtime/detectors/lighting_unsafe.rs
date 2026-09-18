@@ -145,4 +145,21 @@ mod tests {
         let ctx = ctx_at(LUX_ON_THRESHOLD + 1, HeadlampState::Ready);
         assert!(lighting_unsafe_detector(&FsmState::Driving, &ctx).is_none());
     }
+
+    #[test]
+    fn observed_ecus_catalog_does_not_register_lighting_unsafe() {
+        use crate::twin_runtime::controller::AssemblyTopology;
+        use crate::twin_runtime::detectors::detect_internal_after_hop;
+
+        let ctx = ctx_at(20, HeadlampState::Off);
+        assert!(
+            lighting_unsafe_detector(&FsmState::Driving, &ctx).is_some(),
+            "raw detector still describes dark Driving"
+        );
+        assert!(
+            detect_internal_after_hop(&FsmState::Driving, &ctx, AssemblyTopology::ObservedEcus)
+                .is_none(),
+            "ObservedEcus must not synthesize LightingUnsafe"
+        );
+    }
 }

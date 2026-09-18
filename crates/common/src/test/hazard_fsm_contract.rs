@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::time::Instant;
 
 use crate::fsm::{AssemblyId, DomainAction, FsmEvent, FsmState, transition};
+use crate::twin_runtime::controller::AssemblyTopology;
 use crate::twin_runtime::{ZoneReplies, run_to_quiescence, twin_turn};
 use crate::vehicle_state::{BcmState, ObservedBool, VehicleContext};
 
@@ -129,6 +130,7 @@ fn phase_one_rpm_entry_stays_driving_with_inactive_headlamp() {
         &FsmEvent::UpdateRpm(1_500),
         Instant::now(),
         &ZoneReplies::simulate_locally(),
+        AssemblyTopology::ObservedEcus,
     );
     assert_eq!(result.hops.len(), 1);
     assert_eq!(result.final_step().next_state, FsmState::Driving);

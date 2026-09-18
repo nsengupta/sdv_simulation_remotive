@@ -1,17 +1,18 @@
 # Design documents
 
-**Purpose:** catalogue of architecture references. **[`README.md`](../README.md)** is the
-narrative overview and source of truth for what this repo contains.
+**Purpose:** catalogue for this Remotive observation Twin.
+Narrative: [`README.md`](../README.md).
+
+Simulation 5 pyramid, twinlet diagrams, wiper/turn-barrier design notes, and
+phase checklists live in the original Twin — not duplicated here:
+
+→ [`sdv_simulation_5`](https://github.com/nsengupta/sdv_simulation_5)
 
 | Document | Content |
 |----------|---------|
-| [`PLAN.md`](PLAN.md) | Phases summary + important TBDs |
-| [`DESIGN.md`](DESIGN.md) | Stage 5 design decisions |
-| [`ARCHITECTURE-OVERVIEW.md`](ARCHITECTURE-OVERVIEW.md) | Topology, gap register, run order |
-| [`archive/DESIGN-iteration-4.md`](archive/DESIGN-iteration-4.md) | Brain / ROB / twin (Iteration 4) |
-| [`archive/PHASES-detailed.md`](archive/PHASES-detailed.md) | Full phase gates |
-| [`archive/`](archive/) | Iter 4 DESIGN, detailed PHASES, per-phase specs/plans — see [`archive/README.md`](archive/README.md) |
-| [`diagrams/`](../diagrams/) | Brain / headlamp / wiper Mermaid diagrams |
-| [`design-notes-pyramid-layers.md`](design-notes-pyramid-layers.md) | L0–L6 library pyramid |
-| [`TODO-twin-lifecycle.md`](TODO-twin-lifecycle.md) | Phase 10 lifecycle checklist |
+| [`DESIGN-remotive-observation.md`](DESIGN-remotive-observation.md) | Remotive Broker boundary, FLCM status/silence, contracts, runbook |
+| [`DESIGN.md`](DESIGN.md) | Gateway / observation / Dashboard decisions (inherited core) |
+| [`ARCHITECTURE-OVERVIEW.md`](ARCHITECTURE-OVERVIEW.md) | Topology / gap register for this tree |
+| [`PLAN.md`](PLAN.md) | This fork’s plan + pointer to Simulation 5 roadmap |
+| [`TODO-twin-lifecycle.md`](TODO-twin-lifecycle.md) | Twin clean-exit checklist (TL-6+) |
 | [`TODO-simulation-5.md`](TODO-simulation-5.md) | Engineering backlog |

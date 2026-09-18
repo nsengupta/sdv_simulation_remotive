@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use crate::digital_twin::ZoneReply;
 use crate::fsm::{AssemblyId, FsmEvent, FsmState, HeadlampState};
+use crate::twin_runtime::controller::AssemblyTopology;
 use crate::twin_runtime::{ResolvedTurn, ZoneReplies, commit_resolved_turn, twin_turn};
 use crate::vehicle_physics::{FRONT_HEADLAMP_ON_ACK_WAIT, RPM_DRIVING_THRESHOLD};
 use crate::vehicle_state::{HeadlampContext, HeadlampZoneReply, VehicleContext};
@@ -114,6 +115,7 @@ fn given_headlamp_ingress_embed_when_commit_resolved_turn_then_uses_tell_back_no
             now: t0,
             zone_replies: ZoneReplies::with_reply(AssemblyId::Headlamp, ZoneReply::Headlamp(embed)),
         },
+        AssemblyTopology::Legacy,
     );
 
     assert_eq!(
@@ -144,6 +146,7 @@ fn given_simulated_replies_when_twin_turn_after_ack_wait_then_phase_one_stays_si
             now: t0 + FRONT_HEADLAMP_ON_ACK_WAIT,
             zone_replies: ZoneReplies::simulate_locally(),
         },
+        AssemblyTopology::Legacy,
     );
 
     assert_eq!(quiescent.hops.len(), 1);

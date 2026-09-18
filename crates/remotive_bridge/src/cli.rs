@@ -1,13 +1,12 @@
 use anyhow::{Context, Result, bail};
-use common::RPM_DRIVING_THRESHOLD;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
 pub const DEFAULT_BROKER_URL: &str = "http://127.0.0.1:50051";
 pub use vehicle_device_bus::DEFAULT_CAN_INTERFACE;
 pub const DEFAULT_TICK_MS: u64 = emulator::cli::DEFAULT_TICK_MS;
-/// Default RPM ceiling (keeps Twin Idle: Driving needs rpm > this value).
-pub const DEFAULT_RPM_CLAMP: u16 = RPM_DRIVING_THRESHOLD;
+/// Demo cruise ceiling: derived speed stays ≤ 160 km/h (`1400 × 0.114 ≈ 160`).
+pub const DEFAULT_RPM_CLAMP: u16 = crate::source::CRUISE_CEILING_RPM;
 
 const USAGE: &str = "\
 usage: remotive_bridge [--broker-url <url>] [--can-interface <iface>]
@@ -20,7 +19,8 @@ pub struct BridgeArgs {
     pub can_interface: String,
     pub tick: Duration,
     pub readings: Option<NonZeroUsize>,
-    /// Cap for the bridge RPM profile (`profile.min(rpm_clamp)`).
+    /// Cap for the cruise RPM profile (`profile.min(rpm_clamp)`). Default 1400 keeps
+    /// derived speed at or under 160 km/h so ExtremeOperationWarning stays off.
     pub rpm_clamp: u16,
 }
 

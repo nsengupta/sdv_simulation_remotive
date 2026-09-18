@@ -104,7 +104,7 @@ Shell types live in `crates/gateway/src/twin_lifecycle.rs` — Gateway-only
 **Implemented:**
 
 - [`README.md`](../README.md) — section **Dashboard app and twin lifecycle** (composition, trust model, keys, CAN-before-Start, run order, `q` limitation, gateway vs dashboard).
-- [`archive/DESIGN-iteration-4.md`](archive/DESIGN-iteration-4.md) §16.3 — cross-link to README.
+- Twin brain / ROB background: original Iteration 4 twin (see `$ORIGINAL_TWIN_REPO`).
 
 **Acceptance:** docs only; no code change required.
 
@@ -186,12 +186,12 @@ TL-8 parallel anytime after TL-1
 
 ## Out of scope (separate docs)
 
-| Item | Doc |
+| Item | Doc / capability |
 |---|---|
-| CAN `0x100` → PowerOn/PowerOff | [`PLAN.md`](PLAN.md) Phase 1 |
-| Emulator echo / CSV | [`PLAN.md`](PLAN.md) Phase 2 |
-| Observation files + replay | [`PLAN.md`](PLAN.md) Phases 3, 8 |
-| Engineer ledger heartbeat | [`archive/DESIGN-iteration-4.md`](archive/DESIGN-iteration-4.md) §15.5 |
-| Gateway process split | [`PLAN.md`](PLAN.md) Phase 6 |
-| TL-6 / TL-7 / TL-8 | [`PLAN.md`](PLAN.md) Phase 10 |
+| CAN `0x100` → PowerOn/PowerOff | CAN lifecycle — [`ARCHITECTURE-OVERVIEW.md`](ARCHITECTURE-OVERVIEW.md); history in [`sdv_simulation_5`](https://github.com/nsengupta/sdv_simulation_5) |
+| Emulator echo / CSV | Emulator session (CSV deferred) |
+| Observation files + replay | Observation capture; replay deferred (TBD next simulation) |
+| Engineer ledger heartbeat | TUI engineer / ledger panes (this repo) |
+| Gateway process split | Gateway/Dashboard split |
+| TL-6 / TL-7 / TL-8 | Shutdown/disband (this file) |
 | Target architecture overview | [`ARCHITECTURE-OVERVIEW.md`](ARCHITECTURE-OVERVIEW.md) |

@@ -12,7 +12,7 @@
 //!   autonomous 500 ms silence.
 //!
 //! Non-scope:
-//! - Live Remotive broker / pytest (Phase IV Task 8).
+//! - Live Remotive broker / pytest (operator live acceptance).
 //! - SocketCAN `vcan0` transport and standalone actuator processes.
 
 use std::time::Duration;
@@ -29,7 +29,7 @@ use gateway::ingress::can_frame_to_twin_ingress;
 use socketcan::Frame;
 use tokio::sync::mpsc;
 
-const IDENTITY: &str = "E2E-PHASE-II-ASSEMBLY-01";
+const IDENTITY: &str = "E2E-ASSEMBLY-01";
 
 async fn submit_ingress(controller: &VehicleController, event: TwinIngressEvent) {
     controller
@@ -554,7 +554,7 @@ async fn observed_flcm_ok_and_fail_cross_gateway_twin_ledger_and_warning() {
         ..Default::default()
     };
     let (controller, _join) = VehicleController::install_and_start_with_options(
-        "E2E-PHASE-IV-FLCM-STATUS-01".into(),
+        "E2E-FLCM-STATUS-01".into(),
         runtime_options,
     )
     .await
@@ -735,7 +735,7 @@ async fn observed_flcm_silence_sets_silent_flag_and_warning() {
         ..Default::default()
     };
     let (controller, _join) = VehicleController::install_and_start_with_options(
-        "E2E-PHASE-IV-FLCM-SILENCE-01".into(),
+        "E2E-FLCM-SILENCE-01".into(),
         runtime_options,
     )
     .await
@@ -798,7 +798,7 @@ async fn power_on_without_flcm_traffic_never_warns_or_writes_a_silent_row() {
         ..Default::default()
     };
     let (controller, _join) = VehicleController::install_and_start_with_options(
-        "E2E-PHASE-IV-FLCM-NEVER-OBSERVED-01".into(),
+        "E2E-FLCM-NEVER-OBSERVED-01".into(),
         runtime_options,
     )
     .await

@@ -7,7 +7,8 @@ Detailed design notes for each item live in `brain_fsm_redesign_impl_Phase_10.md
 
 ## 1. CAN emulation for `PowerOn` / `PowerOff`
 
-**Status:** Done in **[`PLAN.md`](PLAN.md) Phase 1** / [`archive/PHASES-detailed.md`](archive/PHASES-detailed.md#phase-1--can-lifecycle--silent-ignore-while-off), including the manual `vcan0` smoke gate.  
+**Status:** Done (CAN lifecycle), including the manual `vcan0` smoke gate. See
+[`sdv_simulation_5`](https://github.com/nsengupta/sdv_simulation_5) for historical checklist detail.  
 **Reference:** `brain_fsm_redesign_impl_Phase_10.md` Item C; `analysis_4_response.md` Stage 1.
 
 `PowerOn` and `PowerOff` events are currently injected programmatically.
@@ -19,8 +20,8 @@ Map real CAN frames to FSM events:
 | `0x100` | `00 00 00 00 00 00 00 00` | `FsmEvent::PowerOff` |
 
 The gateway now decodes this strict eight-byte contract into
-`TwinIngressEvent::Lifecycle(LifecycleCommand)`. Emulator transmission belongs to
-[`PLAN.md`](PLAN.md) Phase 2 / [`archive/PHASES-detailed.md`](archive/PHASES-detailed.md#phase-2--emulator-scenario-runner-echo--generate).
+`TwinIngressEvent::Lifecycle(LifecycleCommand)`. Emulator transmission belongs to the
+emulator-session capability (finite `--readings` on CAN).
 
 ---
 
@@ -123,8 +124,8 @@ Keep engineering backlog items below in this file; do not duplicate the README-f
 
 ## Dashboard Tokio event loop
 
-**Status:** Deferred after Phase 3.
+**Status:** Deferred after observation capture.
 
 Replace drain/draw/50-ms keyboard polling with a `tokio::select!` loop over observation arrival,
 keyboard/control events, and a render interval. Preserve capture of every record while allowing
-future keystroke-based driver controls. This is not part of Phase 3 observation persistence.
+future keystroke-based driver controls. This is not part of observation persistence.

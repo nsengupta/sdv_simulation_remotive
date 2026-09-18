@@ -1,7 +1,7 @@
 use crate::dbc_signal_decoder::{decode_dbc_off_or_on, decode_dbc_ok_or_fail};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use emulator::models::{PhysicalWorldModelConfig, RpmModel};
+use emulator::models::{RpmModel, RpmModelConfig};
 use remotivelabs_broker::{
     Connection,
     generated::base::{
@@ -232,6 +232,28 @@ impl ObservationConnector for RemotiveConnector {
     }
 }
 
+/// Floor of the Remotive demo cruise hunt. Twin Driving needs rpm > 1000.
+pub const CRUISE_FLOOR_RPM: u16 = 1100;
+/// Low target ≈ 125 km/h (`1100 × 0.114`).
+pub const CRUISE_LOW_TARGET_RPM: f32 = 1100.0;
+/// High target ≈ 154 km/h (`1350 × 0.114`), under the 160 km/h warning line.
+pub const CRUISE_HIGH_TARGET_RPM: f32 = 1350.0;
+/// Hard ceiling ≈ 160 km/h (`1400 × 0.114`).
+pub const CRUISE_CEILING_RPM: u16 = 1400;
+
+fn observation_cruise_rpm_config() -> RpmModelConfig {
+    RpmModelConfig {
+        idle_rpm: CRUISE_FLOOR_RPM,
+        extreme_operation_rpm: common::RPM_EXTREME_OPERATION_THRESHOLD,
+        redline_rpm: CRUISE_CEILING_RPM,
+        high_target_rpm: CRUISE_HIGH_TARGET_RPM,
+        low_target_rpm: CRUISE_LOW_TARGET_RPM,
+        target_flip_period_secs: 10,
+        proportional_gain: 0.1,
+        jitter_amplitude: 12.0,
+    }
+}
+
 pub struct ProfileRpmSource {
     model: RpmModel,
     current_rpm: u16,
@@ -241,7 +263,7 @@ pub struct ProfileRpmSource {
 
 impl ProfileRpmSource {
     pub fn new(tick: Duration, rpm_clamp: u16) -> Self {
-        let config = PhysicalWorldModelConfig::daytime_tunnel_profile().rpm;
+        let config = observation_cruise_rpm_config();
         let current_rpm = config.idle_rpm.min(rpm_clamp);
         Self {
             model: RpmModel::new(config),

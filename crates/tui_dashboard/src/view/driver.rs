@@ -1,14 +1,12 @@
 use super::{
-    MISSING, LineRole, PaneLine, Segment, SegmentContent, SegmentStyle, format_low_beam_status,
+    format_low_beam_status, LineRole, PaneLine, Segment, SegmentContent, SegmentStyle, MISSING,
 };
-use common::DiagnosticRecord;
 use common::facade::{
     DiagnosticKind, DiagnosticLevel, PublishedObservedBool, PublishedTransitionRecord,
 };
 use common::fsm::FrontHeadlampIncompleteCause;
-use common::vehicle_physics::{
-    SPEED_EXTREME_OPERATION_THRESHOLD_KPH, speed_band, speed_bar_cells,
-};
+use common::vehicle_physics::{speed_band, speed_bar_cells, SPEED_EXTREME_OPERATION_THRESHOLD_KPH};
+use common::DiagnosticRecord;
 use unicode_width::UnicodeWidthStr;
 
 pub struct DriverPane {
@@ -57,16 +55,10 @@ pub fn driver_pane(
             width,
         ),
         PaneLine::spacer(width),
-        observed_pane_line(
-            "Left request: ",
+        front_light_pane_line(
             ledger
                 .map(|row| row.current_ctx.bcm.left_turn_request_on)
                 .unwrap_or(PublishedObservedBool::Unknown),
-            width,
-        ),
-        PaneLine::spacer(width),
-        observed_pane_line(
-            "Right request: ",
             ledger
                 .map(|row| row.current_ctx.bcm.right_turn_request_on)
                 .unwrap_or(PublishedObservedBool::Unknown),
@@ -74,16 +66,9 @@ pub fn driver_pane(
         ),
         PaneLine::spacer(width),
         low_beam_pane_line(
-            "Low beam L: ",
             ledger
                 .map(|row| row.current_ctx.flcm.left_low_beam_status_ok)
                 .unwrap_or(PublishedObservedBool::Unknown),
-            flcm_silent,
-            width,
-        ),
-        PaneLine::spacer(width),
-        low_beam_pane_line(
-            "Low beam R: ",
             ledger
                 .map(|row| row.current_ctx.flcm.right_low_beam_status_ok)
                 .unwrap_or(PublishedObservedBool::Unknown),
@@ -253,13 +238,37 @@ fn observed_pane_line(label: &str, value: PublishedObservedBool, width: usize) -
     labeled_visibility_line(label, format_observed_bool(value), width)
 }
 
+fn front_light_pane_line(
+    left: PublishedObservedBool,
+    right: PublishedObservedBool,
+    width: usize,
+) -> PaneLine {
+    labeled_visibility_line(
+        "Front Light ",
+        &format!(
+            "(L) {}:  (R) {}",
+            format_observed_bool(left),
+            format_observed_bool(right)
+        ),
+        width,
+    )
+}
+
 fn low_beam_pane_line(
-    label: &str,
-    value: PublishedObservedBool,
+    left: PublishedObservedBool,
+    right: PublishedObservedBool,
     silent: bool,
     width: usize,
 ) -> PaneLine {
-    labeled_visibility_line(label, &format_low_beam_status(value, silent), width)
+    labeled_visibility_line(
+        "Low Beam ",
+        &format!(
+            "(L) {}:  (R) {}",
+            format_low_beam_status(left, silent),
+            format_low_beam_status(right, silent)
+        ),
+        width,
+    )
 }
 
 fn labeled_visibility_line(label: &str, value: &str, width: usize) -> PaneLine {
@@ -288,17 +297,15 @@ fn fit_or_pad(line: PaneLine, width: usize) -> PaneLine {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use common::facade::{
-        PublishedBcmContext, PublishedBcmState, PublishedFlcmContext, PublishedFsmEvent, PublishedFsmState,
-        PublishedHeadlampContext, PublishedHeadlampState, PublishedHealthContext,
-        PublishedPowertrainContext, PublishedSccmContext, PublishedVehicleContext,
-        PublishedVisibilityContext,
-        PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
-        UnixTimestamp,
+        PublishedBcmContext, PublishedBcmState, PublishedFlcmContext, PublishedFsmEvent,
+        PublishedFsmState, PublishedHeadlampContext, PublishedHeadlampState,
+        PublishedHealthContext, PublishedPowertrainContext, PublishedSccmContext,
+        PublishedVehicleContext, PublishedVisibilityContext, PublishedWeatherContext,
+        PublishedWheelRpm, PublishedWiperContext, PublishedWiperState, UnixTimestamp,
     };
     use common::vehicle_physics::SpeedBand;
     use std::time::Duration;
@@ -358,9 +365,7 @@ mod tests {
                 oil_pressure_kpa: 100,
                 tyre_pressure_ok: true,
             },
-            visibility: PublishedVisibilityContext {
-                ambient_lux: lux,
-            },
+            visibility: PublishedVisibilityContext { ambient_lux: lux },
             weather: PublishedWeatherContext { raining: false },
             headlamp: PublishedHeadlampContext {
                 state: headlamp,
@@ -379,17 +384,22 @@ mod tests {
         });
         let ledger = sample_ledger(80, 150, PublishedHeadlampState::On);
         let pane = driver_pane(Some(&diag), Some(&ledger), 48);
-        let notice = pane.lines.iter().find(|l| l.role == LineRole::Notice).unwrap();
+        let notice = pane
+            .lines
+            .iter()
+            .find(|l| l.role == LineRole::Notice)
+            .unwrap();
         assert!(notice.text().contains("Notice: Warning"));
         assert!(notice.text().contains("tunnel ahead"));
-        assert!(
-            notice
-                .segments
-                .iter()
-                .any(|s| matches!(&s.content, SegmentContent::Text(t) if t == "Notice: ")
-                    && s.style == SegmentStyle::Label)
-        );
-        let speed_line = pane.lines.iter().find(|l| l.role == LineRole::Speed).unwrap();
+        assert!(notice.segments.iter().any(
+            |s| matches!(&s.content, SegmentContent::Text(t) if t == "Notice: ")
+                && s.style == SegmentStyle::Label
+        ));
+        let speed_line = pane
+            .lines
+            .iter()
+            .find(|l| l.role == LineRole::Speed)
+            .unwrap();
         assert!(speed_line.text().starts_with("Speed: ["));
         assert!(speed_line.text().contains("80/160 km/h"));
         assert!(speed_line.text().contains('|'));
@@ -399,7 +409,11 @@ mod tests {
     fn speed_line_zones_and_numeric_band_style() {
         let ledger = sample_ledger(155, 0, PublishedHeadlampState::Off);
         let pane = driver_pane(None, Some(&ledger), 64);
-        let speed = pane.lines.iter().find(|l| l.role == LineRole::Speed).unwrap();
+        let speed = pane
+            .lines
+            .iter()
+            .find(|l| l.role == LineRole::Speed)
+            .unwrap();
         let bar = speed
             .segments
             .iter()
@@ -417,13 +431,10 @@ mod tests {
             .find(|s| matches!(&s.content, SegmentContent::Text(t) if t.contains("km/h")))
             .expect("numeric suffix");
         assert_eq!(numeric.style, SegmentStyle::ZoneRed);
-        assert!(
-            speed
-                .segments
-                .iter()
-                .any(|s| matches!(&s.content, SegmentContent::Text(t) if t.starts_with("Speed:"))
-                    && s.style == SegmentStyle::Label)
-        );
+        assert!(speed.segments.iter().any(
+            |s| matches!(&s.content, SegmentContent::Text(t) if t.starts_with("Speed:"))
+                && s.style == SegmentStyle::Label
+        ));
     }
 
     #[test]
@@ -514,8 +525,14 @@ mod tests {
         });
         let ledger = sample_ledger(0, 100, PublishedHeadlampState::Off);
         let pane = driver_pane(Some(&diag), Some(&ledger), 60);
-        let notice = pane.lines.iter().find(|l| l.role == LineRole::Notice).unwrap();
-        assert!(notice.text().starts_with("Notice: Must be IDLE before POWER-OFF"));
+        let notice = pane
+            .lines
+            .iter()
+            .find(|l| l.role == LineRole::Notice)
+            .unwrap();
+        assert!(notice
+            .text()
+            .starts_with("Notice: Must be IDLE before POWER-OFF"));
         assert!(!notice.text().contains("My-Opel"));
         assert!(!notice.text().contains("REJECTED"));
     }
@@ -529,8 +546,12 @@ mod tests {
         assert_eq!(roles[0], LineRole::Spacer);
         assert_eq!(roles[1], LineRole::Spacer);
         assert_eq!(roles[2], LineRole::Notice);
-        assert!(roles.windows(2).any(|w| w[0] == LineRole::Notice && w[1] == LineRole::Spacer));
-        assert!(roles.windows(2).any(|w| w[0] == LineRole::Speed && w[1] == LineRole::Spacer));
+        assert!(roles
+            .windows(2)
+            .any(|w| w[0] == LineRole::Notice && w[1] == LineRole::Spacer));
+        assert!(roles
+            .windows(2)
+            .any(|w| w[0] == LineRole::Speed && w[1] == LineRole::Spacer));
         let labels: Vec<String> = pane
             .lines
             .iter()
@@ -538,11 +559,9 @@ mod tests {
             .map(PaneLine::text)
             .collect();
         assert!(labels.iter().any(|t| t.contains("Hazard:")));
-        assert!(labels.iter().any(|t| t.contains("Left request:")));
-        assert!(labels.iter().any(|t| t.contains("Right request:")));
-        assert!(labels.iter().any(|t| t.contains("Low beam L:")));
-        assert!(labels.iter().any(|t| t.contains("Low beam R:")));
-        assert_eq!(labels.len(), 5);
+        assert!(labels.iter().any(|t| t.contains("Front Light ")));
+        assert!(labels.iter().any(|t| t.contains("Low Beam ")));
+        assert_eq!(labels.len(), 3);
     }
 
     #[test]
@@ -634,10 +653,11 @@ mod tests {
         let ledger = sample_ledger(10, 100, PublishedHeadlampState::Off);
         let text = pane_text(&driver_pane(None, Some(&ledger), 64));
         assert!(text.contains("Hazard: UNKNOWN"), "{text}");
-        assert!(text.contains("Left request: UNKNOWN"), "{text}");
-        assert!(text.contains("Right request: UNKNOWN"), "{text}");
-        assert!(text.contains("Low beam L: UNKNOWN"), "{text}");
-        assert!(text.contains("Low beam R: UNKNOWN"), "{text}");
+        assert!(
+            text.contains("Front Light (L) UNKNOWN:  (R) UNKNOWN"),
+            "{text}"
+        );
+        assert!(text.contains("Low Beam (L) UNKNOWN:  (R) UNKNOWN"), "{text}");
     }
 
     #[test]
@@ -648,8 +668,10 @@ mod tests {
         hazard_on.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::On;
         let on_off = pane_text(&driver_pane(None, Some(&hazard_on), 64));
         assert!(on_off.contains("Hazard: ON"), "{on_off}");
-        assert!(on_off.contains("Left request: OFF"), "{on_off}");
-        assert!(on_off.contains("Right request: ON"), "{on_off}");
+        assert!(
+            on_off.contains("Front Light (L) OFF:  (R) ON"),
+            "{on_off}"
+        );
 
         let mut all_off = sample_ledger(10, 100, PublishedHeadlampState::Off);
         all_off.current_ctx.sccm.hazard_mode_on = PublishedObservedBool::Off;
@@ -657,8 +679,10 @@ mod tests {
         all_off.current_ctx.bcm.right_turn_request_on = PublishedObservedBool::Off;
         let off_on = pane_text(&driver_pane(None, Some(&all_off), 64));
         assert!(off_on.contains("Hazard: OFF"), "{off_on}");
-        assert!(off_on.contains("Left request: ON"), "{off_on}");
-        assert!(off_on.contains("Right request: OFF"), "{off_on}");
+        assert!(
+            off_on.contains("Front Light (L) ON:  (R) OFF"),
+            "{off_on}"
+        );
     }
 
     #[test]
@@ -677,12 +701,10 @@ mod tests {
         assert!(text.contains("Speed:"), "{text}");
         assert!(text.contains("42/"), "{text}");
         assert!(text.contains("Hazard: ON"), "{text}");
-        assert!(text.contains("Left request: ON"), "{text}");
-        assert!(text.contains("Right request: ON"), "{text}");
-        assert!(text.contains("Low beam L: OK"), "{text}");
-        assert!(text.contains("Low beam R: FAIL"), "{text}");
-        assert!(!text.contains("Low beam L: ON"), "{text}");
-        assert!(!text.contains("Low beam R: OFF"), "{text}");
+        assert!(text.contains("Front Light (L) ON:  (R) ON"), "{text}");
+        assert!(text.contains("Low Beam (L) OK:  (R) FAIL"), "{text}");
+        assert!(!text.contains("Low Beam (L) ON"), "{text}");
+        assert!(!text.contains("(R) OFF"), "{text}");
 
         for forbidden in [
             "Visibility:",
@@ -694,6 +716,8 @@ mod tests {
             "lux",
             "Raining",
             "Rain ",
+            "Left request:",
+            "Right request:",
         ] {
             assert!(!text.contains(forbidden), "found {forbidden:?} in {text}");
         }
@@ -708,11 +732,12 @@ mod tests {
         ledger.current_ctx.flcm.left_low_beam_status_ok = PublishedObservedBool::Off;
         ledger.current_ctx.flcm.right_low_beam_status_ok = PublishedObservedBool::Unknown;
         let text = pane_text(&driver_pane(None, Some(&ledger), 64));
-        assert!(text.contains("Low beam L: FAIL"), "{text}");
-        assert!(text.contains("Low beam R: UNKNOWN"), "{text}");
-        assert!(!text.contains("Low beam L: ON"), "{text}");
-        assert!(!text.contains("Low beam R: ON"), "{text}");
-        assert!(!text.contains("Low beam L: OFF"), "{text}");
+        assert!(
+            text.contains("Low Beam (L) FAIL:  (R) UNKNOWN"),
+            "{text}"
+        );
+        assert!(!text.contains("Low Beam (L) ON"), "{text}");
+        assert!(!text.contains("Low Beam (L) OFF"), "{text}");
     }
 
     #[test]
@@ -723,12 +748,14 @@ mod tests {
         ledger.current_ctx.flcm.silent = true;
 
         let text = pane_text(&driver_pane(None, Some(&ledger), 64));
-        assert!(text.contains("Low beam L: OK (stale)"), "{text}");
-        assert!(text.contains("Low beam R: OK (stale)"), "{text}");
+        assert!(
+            text.contains("Low Beam (L) OK (stale):  (R) OK (stale)"),
+            "{text}"
+        );
 
         ledger.current_ctx.flcm.silent = false;
         let alive = pane_text(&driver_pane(None, Some(&ledger), 64));
-        assert!(alive.contains("Low beam L: OK"), "{alive}");
+        assert!(alive.contains("Low Beam (L) OK:  (R) OK"), "{alive}");
         assert!(!alive.contains("(stale)"), "{alive}");
     }
 

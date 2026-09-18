@@ -1,4 +1,4 @@
-//! One-crate library pyramid — layer map in `docs/design-notes-pyramid-layers.md`.
+//! One-crate library pyramid — layer map in Simulation 5 docs (`sdv_simulation_5`).
 //!
 //! Sibling order is *dependee before dependent* (foundation first), not runtime data-flow order.
 //!

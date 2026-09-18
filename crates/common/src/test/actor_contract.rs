@@ -4,11 +4,12 @@ use crate::digital_twin::TwinMessage;
 use crate::fsm::{FsmEvent, FsmState, HeadlampState};
 use crate::test::{
     ActorGuard, expect_actuation_command, inject_matching_ack, inject_matching_nack,
-    power_on_to_idle,
+    power_on_to_idle, wait_fsm_state,
 };
 use crate::twin_runtime::controller::vehicle_controller::{
     AssemblyTopology, VehicleControllerRuntimeOptions,
 };
+use crate::vehicle_physics::RPM_DRIVING_THRESHOLD;
 use crate::vehicle_state::VehicleContext;
 use crate::{ActuationCommand, TwinIngressEvent, VehicleController, VssSignal};
 use crate::{PublishedFsmEvent, PublishedFsmState};
@@ -69,6 +70,49 @@ async fn default_observed_ecus_topology_ignores_legacy_headlamp_and_wiper_ingres
         VehicleContext::default().visibility.ambient_lux
     );
     assert!(!snapshot.context().weather.raining);
+}
+
+#[tokio::test]
+async fn observed_ecus_rpm_into_driving_in_default_dark_does_not_enter_danger() {
+    assert_eq!(
+        VehicleControllerRuntimeOptions::default().assembly_topology,
+        AssemblyTopology::ObservedEcus
+    );
+    let (controller, handle) = VehicleController::install_and_start_with_options(
+        "OBSERVED-ECUS-CRUISE".to_string(),
+        VehicleControllerRuntimeOptions::default(),
+    )
+    .await
+    .expect("install twin");
+    let _guard = ActorGuard {
+        addr: controller.get_actor_ref().clone(),
+        handle,
+    };
+
+    power_on_to_idle(&controller).await;
+    controller
+        .submit_twin_ingress(TwinIngressEvent::Telemetry(VssSignal::EngineRpm(
+            RPM_DRIVING_THRESHOLD + 200,
+        )))
+        .await
+        .expect("rpm into Driving");
+    wait_fsm_state(
+        &controller,
+        FsmState::Driving,
+        std::time::Duration::from_millis(500),
+    )
+    .await;
+
+    let snapshot = controller
+        .get_snapshot(Some(DEFAULT_ACTOR_TIMEOUT))
+        .await
+        .expect("snapshot");
+    assert_eq!(*snapshot.current_state(), FsmState::Driving);
+    assert_eq!(
+        snapshot.context().visibility.ambient_lux,
+        VehicleContext::default().visibility.ambient_lux,
+        "ObservedEcus must not accept lux; default darkness must not latch danger"
+    );
 }
 
 #[tokio::test]

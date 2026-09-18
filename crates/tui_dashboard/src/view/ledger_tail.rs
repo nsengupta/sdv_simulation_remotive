@@ -1,4 +1,4 @@
-use super::{LineRole, PaneLine, fit_line};
+use super::{fit_line, LineRole, PaneLine};
 use common::facade::{
     PublishedBcmState, PublishedFsmEvent, PublishedFsmState, PublishedObservedBool,
     PublishedTransitionRecord,
@@ -35,7 +35,7 @@ impl LedgerTail {
             .collect()
     }
 
- /// Fit to a visible row budget (inner pane height), keeping the newest lines.
+    /// Fit to a visible row budget (inner pane height), keeping the newest lines.
     pub fn visible_lines(&self, width: usize, max_rows: usize) -> Vec<PaneLine> {
         let mut lines = self.lines(width);
         if max_rows == 0 {
@@ -96,10 +96,9 @@ pub fn format_ledger_line(row: &PublishedTransitionRecord, width: usize, newest:
 
 fn format_state(state: &PublishedFsmState) -> String {
     match state {
+        PublishedFsmState::Idle => "Cruise".to_owned(),
         PublishedFsmState::Off => "SwitchedOff".to_owned(),
-        PublishedFsmState::ExtremeOperationWarning { .. } => {
-            "ExtremeOperationWarning".to_owned()
-        }
+        PublishedFsmState::ExtremeOperationWarning { .. } => "ExtremeOperationWarning".to_owned(),
         other => format!("{other:?}"),
     }
 }
@@ -144,11 +143,11 @@ fn format_bcm_state(state: PublishedBcmState) -> &'static str {
 mod tests {
     use super::*;
     use common::facade::{
-        PublishedBcmContext, PublishedFlcmContext, PublishedHeadlampContext, PublishedHeadlampState,
-        PublishedHealthContext, PublishedPowertrainContext,
-        PublishedSccmContext,
-        PublishedVehicleContext, PublishedVisibilityContext, PublishedWeatherContext,
-        PublishedWheelRpm, PublishedWiperContext, PublishedWiperState, UnixTimestamp,
+        PublishedBcmContext, PublishedFlcmContext, PublishedHeadlampContext,
+        PublishedHeadlampState, PublishedHealthContext, PublishedPowertrainContext,
+        PublishedSccmContext, PublishedVehicleContext, PublishedVisibilityContext,
+        PublishedWeatherContext, PublishedWheelRpm, PublishedWiperContext, PublishedWiperState,
+        UnixTimestamp,
     };
     use std::time::Duration;
     use unicode_width::UnicodeWidthStr;
@@ -210,7 +209,10 @@ mod tests {
     fn ledger_tail_keeps_last_20_of_25() {
         let mut tail = LedgerTail::new();
         for seq in 1..=25 {
-            tail.push(sample_with_seq(seq, PublishedFsmEvent::UpdateRpm(seq as u16)));
+            tail.push(sample_with_seq(
+                seq,
+                PublishedFsmEvent::UpdateRpm(seq as u16),
+            ));
         }
         let lines = tail.lines(80);
         assert_eq!(lines.len(), 20);
@@ -218,7 +220,7 @@ mod tests {
         assert!(lines[19].text().starts_with("> "));
         assert!(lines[19].text().contains("[25]"));
         assert!(lines[19].text().contains(" | UpdateRpm(25) | "));
-        assert!(lines[19].text().contains("Idle -> Driving"));
+        assert!(lines[19].text().contains("Cruise -> Driving"));
     }
 
     #[test]
@@ -226,7 +228,10 @@ mod tests {
         let mut tail = LedgerTail::new();
         tail.push(sample_with_seq(1, PublishedFsmEvent::PowerOn));
         for seq in 2..=15 {
-            tail.push(sample_with_seq(seq, PublishedFsmEvent::UpdateRpm(seq as u16)));
+            tail.push(sample_with_seq(
+                seq,
+                PublishedFsmEvent::UpdateRpm(seq as u16),
+            ));
         }
         tail.push(sample_with_seq(16, PublishedFsmEvent::PowerOff));
         for seq in 17..=40 {
@@ -238,8 +243,14 @@ mod tests {
             .map(|l| l.text())
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(text.contains("PowerOff"), "PowerOff must stay visible: {text}");
-        assert!(text.contains("PowerOn"), "PowerOn must stay visible: {text}");
+        assert!(
+            text.contains("PowerOff"),
+            "PowerOff must stay visible: {text}"
+        );
+        assert!(
+            text.contains("PowerOn"),
+            "PowerOn must stay visible: {text}"
+        );
         assert_eq!(tail.lines(100).len(), LEDGER_TAIL_N);
     }
 
@@ -294,10 +305,7 @@ mod tests {
             false,
         )
         .text();
-        assert!(
-            right.contains("RightTurnRequestObserved(false)"),
-            "{right}"
-        );
+        assert!(right.contains("RightTurnRequestObserved(false)"), "{right}");
     }
 
     #[test]
