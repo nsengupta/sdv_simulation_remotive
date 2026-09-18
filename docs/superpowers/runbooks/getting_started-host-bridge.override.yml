@@ -1,8 +1,0 @@
-# Twin-owned compose override. Do not copy this into the Remotive tree.
-# Renames only the host Linux bridge so it does not collide with
-# remotive_car_hello_world's control_network. No Remotive service,
-# signal, profile, or test is changed.
-networks:
-  ----control_network:
-    driver_opts:
-      com.docker.network.bridge.name: gs_local_ctl
