@@ -1,7 +1,7 @@
 use remotive_bridge::cli::{
     DEFAULT_BROKER_URL, DEFAULT_CAN_INTERFACE, DEFAULT_RPM_CLAMP, DEFAULT_TICK_MS, parse_args,
 };
-use remotive_bridge::decoder::{decode_boolean, decode_ok_fail};
+use remotive_bridge::dbc_signal_decoder::{decode_dbc_off_or_on, decode_dbc_ok_or_fail};
 use remotive_bridge::source::{
     BrokerObservation, CLIENT_ID, FLCM_NAMESPACE, HAZARD_NAME, HAZARD_NAMESPACE,
     LEFT_LOW_BEAM_STATUS_NAME, LEFT_TURN_NAME, ObservationRejectCounters, ProfileRpmSource,
@@ -104,7 +104,7 @@ fn decoder_accepts_only_documented_boolean_encodings() {
         (Payload::StrValue("Off".into()), false),
         (Payload::StrValue("On".into()), true),
     ] {
-        assert_eq!(decode_boolean(Some(&payload)), Some(expected));
+        assert_eq!(decode_dbc_off_or_on(Some(&payload)), Some(expected));
     }
 
     let malformed = [
@@ -119,7 +119,7 @@ fn decoder_accepts_only_documented_boolean_encodings() {
         Some(Payload::StrValue("invalid".into())),
     ];
     for payload in malformed {
-        assert_eq!(decode_boolean(payload.as_ref()), None);
+        assert_eq!(decode_dbc_off_or_on(payload.as_ref()), None);
     }
 }
 
@@ -133,7 +133,7 @@ fn decoder_maps_dbc_ok_fail_integers_and_named_values() {
         (Payload::StrValue("Ok".into()), true),
         (Payload::StrValue("Fail".into()), false),
     ] {
-        assert_eq!(decode_ok_fail(Some(&payload)), Some(expected));
+        assert_eq!(decode_dbc_ok_or_fail(Some(&payload)), Some(expected));
     }
 
     let malformed = [
@@ -150,7 +150,7 @@ fn decoder_maps_dbc_ok_fail_integers_and_named_values() {
         Some(Payload::StrValue("fail".into())),
     ];
     for payload in malformed {
-        assert_eq!(decode_ok_fail(payload.as_ref()), None);
+        assert_eq!(decode_dbc_ok_or_fail(payload.as_ref()), None);
     }
 }
 
@@ -358,6 +358,10 @@ fn cli_defaults_and_overrides_are_emulator_compatible() {
     let defaults = parse_args(std::iter::empty::<&str>()).unwrap();
     assert_eq!(defaults.broker_url, DEFAULT_BROKER_URL);
     assert_eq!(defaults.can_interface, DEFAULT_CAN_INTERFACE);
+    assert_eq!(
+        DEFAULT_CAN_INTERFACE,
+        vehicle_device_bus::DEFAULT_CAN_INTERFACE
+    );
     assert_eq!(defaults.tick, Duration::from_millis(DEFAULT_TICK_MS));
     assert_eq!(defaults.readings, None);
     assert_eq!(defaults.rpm_clamp, DEFAULT_RPM_CLAMP);

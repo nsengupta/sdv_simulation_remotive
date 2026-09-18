@@ -12,8 +12,9 @@ pub struct FlcmContext {
 /// FLCM zone vocabulary.
 ///
 /// There is no `TimerTick` arm: liveness is owned by the actor's cancellable silence
-/// deadline, which reports through [`FlcmMessage::SilenceChanged`]. Brain ticks stay a
-/// passthrough turn.
+/// deadline, which reports through [`FlcmMessage::SilenceChanged`]. A brain `TimerTick`
+/// does not become a `FlcmMessage`; the parent records it as a passthrough turn (it
+/// still ages headlamp ACK waits in context merge — that is not FLCM work).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlcmMessage {
     BecomeOn,

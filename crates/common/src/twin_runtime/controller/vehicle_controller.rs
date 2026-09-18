@@ -26,9 +26,9 @@ pub enum VehicleControllerError {
 /// Selects the actor topology installed by the controller.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AssemblyTopology {
-    /// Active integration topology: SCCM and BCM are spawned and routed.
+    /// Active integration topology: SCCM, BCM, and FLCM are spawned and routed.
     #[default]
-    PhaseI,
+    ObservedEcus,
     /// Explicit compatibility topology for legacy headlamp/wiper applications and tests.
     Legacy,
 }
@@ -44,19 +44,19 @@ pub struct VehicleControllerRuntimeOptions {
         >,
     >,
     pub transition_tx: Option<tokio::sync::mpsc::Sender<PublishedTransitionRecord>>,
-    /// Contract tests: headlamp twinlet ignores tells (exercises tell-back timeout path).
+    /// Test-only mute switches, forwarded at child spawn in `VirtualCarActor::pre_start`.
+    ///
+    /// Production callers leave every flag `false`. Contract tests set a flag so that
+    /// twinlet ignores tells: the parent can then inject `ZoneReady` itself, or wait
+    /// for tell-back timeout, without a real zone reply racing the scenario.
     #[doc(hidden)]
     pub test_silent_headlamp: bool,
-    /// Contract tests: wiper twinlet ignores tells (manual `ZoneReady` injection needed).
     #[doc(hidden)]
     pub test_silent_wiper: bool,
-    /// Contract tests: BCM twinlet ignores tells (manual `ZoneReady` injection needed).
     #[doc(hidden)]
     pub test_silent_bcm: bool,
-    /// Contract tests: SCCM twinlet ignores tells (manual `ZoneReady` injection needed).
     #[doc(hidden)]
     pub test_silent_sccm: bool,
-    /// Contract tests: FLCM twinlet ignores tells.
     #[doc(hidden)]
     pub test_silent_flcm: bool,
 }
@@ -64,7 +64,7 @@ pub struct VehicleControllerRuntimeOptions {
 impl Default for VehicleControllerRuntimeOptions {
     fn default() -> Self {
         Self {
-            assembly_topology: AssemblyTopology::PhaseI,
+            assembly_topology: AssemblyTopology::ObservedEcus,
             log_timer_tick: false,
             actuation_command_tx: None,
             diagnostic_tx: None,

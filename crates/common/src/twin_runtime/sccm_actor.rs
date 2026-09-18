@@ -10,7 +10,6 @@ pub struct SccmActorVocabulary {
     pub message: SccmMessage,
     pub turn_id: u64,
     pub tell_attempt: u32,
-    pub brain: ActorRef<TwinMessage>,
 }
 
 #[derive(Debug)]
@@ -23,14 +22,16 @@ pub struct SccmActorState {
     pub ctx: SccmContext,
     pub silent: bool,
     pub hazard_streak: ObservationStreak<bool>,
+    brain: ActorRef<TwinMessage>,
 }
 
 impl SccmActorState {
-    pub fn new(ctx: SccmContext, silent: bool) -> Self {
+    pub fn new(ctx: SccmContext, silent: bool, brain: ActorRef<TwinMessage>) -> Self {
         Self {
             ctx,
             silent,
             hazard_streak: ObservationStreak::default(),
+            brain,
         }
     }
 }
@@ -63,7 +64,7 @@ impl Actor for SccmActor {
             return Ok(());
         }
         let reply = apply_sccm_message(state, vocab.message);
-        vocab
+        state
             .brain
             .send_message(TwinMessage::ZoneReady {
                 zone_id: crate::fsm::AssemblyId::Sccm,
@@ -129,7 +130,6 @@ fn apply_sccm_message(state: &mut SccmActorState, message: SccmMessage) -> SccmZ
 
 pub fn tell_sccm_zone(
     sccm: &ActorRef<SccmActorMsg>,
-    brain: &ActorRef<TwinMessage>,
     turn_id: u64,
     tell_attempt: u32,
     message: SccmMessage,
@@ -138,7 +138,6 @@ pub fn tell_sccm_zone(
         message,
         turn_id,
         tell_attempt,
-        brain: brain.clone(),
     }))
     .map_err(|e| ActorProcessingErr::from(std::io::Error::other(format!("tell_sccm_zone: {e:?}"))))
 }

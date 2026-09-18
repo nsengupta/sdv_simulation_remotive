@@ -39,12 +39,12 @@ impl Projector<TwinIngressEvent, TwinMessage> for IngressToFsmProjector {
                 VssSignal::EngineRpm(rpm) => FsmEvent::UpdateRpm(rpm),
                 VssSignal::AmbientLux(_) => {
                     return Err(ProjectionError::InvalidPayload(
-                        "AmbientLux is not accepted by the Phase I ingress boundary",
+                        "AmbientLux is not accepted on the observation ingress boundary",
                     ));
                 }
                 VssSignal::RainDetected(_) => {
                     return Err(ProjectionError::InvalidPayload(
-                        "RainDetected is not accepted by the Phase I ingress boundary",
+                        "RainDetected is not accepted on the observation ingress boundary",
                     ));
                 }
             },

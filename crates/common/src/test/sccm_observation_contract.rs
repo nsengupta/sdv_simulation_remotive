@@ -64,8 +64,7 @@ fn sccm_default_hazard_mode_is_off() {
 
 #[test]
 fn sccm_rising_edge_toggles_mode_on_and_pulse_off_leaves_mode_on() {
-    let on = SccmContext::default()
-        .on_receiving_message(SccmMessage::HazardButtonObserved(true));
+    let on = SccmContext::default().on_receiving_message(SccmMessage::HazardButtonObserved(true));
     assert_eq!(on.ctx.hazard_button, ObservedBool::On);
     assert_eq!(on.ctx.hazard_mode, ObservedBool::On);
 

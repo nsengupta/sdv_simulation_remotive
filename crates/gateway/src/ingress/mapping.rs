@@ -163,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_phase_one_telemetry_is_not_twin_ingress() {
+    fn unsupported_observation_ingress_telemetry_is_not_twin_ingress() {
         for signal in [
             VssSignal::Speed(50.0),
             VssSignal::AmbientLux(28),

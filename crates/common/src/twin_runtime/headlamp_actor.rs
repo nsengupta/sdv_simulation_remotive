@@ -22,7 +22,6 @@ pub struct HeadlampActorVocabulary {
     pub turn_id: u64,
     /// Matches brain tell-back wait attempt (retries use incrementing ids).
     pub tell_attempt: u32,
-    pub brain: ActorRef<TwinMessage>,
 }
 
 /// Headlamp twinlet mailbox — brain tells plus internal ACK deadlines.
@@ -39,16 +38,16 @@ pub struct HeadlampActorState {
     pub ctx: HeadlampContext,
     /// When true, swallow tells without tell-back (contract tests only).
     pub silent: bool,
-    brain: Option<ActorRef<TwinMessage>>,
+    brain: ActorRef<TwinMessage>,
     ack_timer: Option<AckTimer>,
 }
 
 impl HeadlampActorState {
-    pub fn new(ctx: HeadlampContext, silent: bool) -> Self {
+    pub fn new(ctx: HeadlampContext, silent: bool, brain: ActorRef<TwinMessage>) -> Self {
         Self {
             ctx,
             silent,
-            brain: None,
+            brain,
             ack_timer: None,
         }
     }
@@ -107,18 +106,17 @@ impl HeadlampActor {
             now,
             turn_id,
             tell_attempt,
-            brain,
         }: HeadlampActorVocabulary,
     ) -> Result<(), ActorProcessingErr> {
         if state.silent {
             return Ok(());
         }
 
-        state.brain = Some(brain.clone());
         let zone_reply = state.ctx.on_receiving_message(message, now);
         state.ctx = zone_reply.ctx.clone();
         maybe_arm_ack_timer(myself, state);
-        brain
+        state
+            .brain
             .send_message(TwinMessage::ZoneReady {
                 zone_id: crate::fsm::AssemblyId::Headlamp,
                 turn_id,
@@ -138,9 +136,6 @@ impl HeadlampActor {
         direction: FrontHeadlampSwitchDirection,
     ) -> Result<(), ActorProcessingErr> {
         state.ack_timer = None;
-        let Some(brain) = state.brain.clone() else {
-            return Ok(());
-        };
         let now = Instant::now();
         let zone_reply = state.ctx.on_receiving_message(
             HeadlampMessage::ActuationIncomplete {
@@ -151,7 +146,8 @@ impl HeadlampActor {
         );
         state.ctx = zone_reply.ctx.clone();
         abort_ack_timer(&mut state.ack_timer);
-        brain
+        state
+            .brain
             .send_message(TwinMessage::ZoneSpontaneous {
                 zone_id: crate::fsm::AssemblyId::Headlamp,
                 event: ZoneSpontaneousEvent::Headlamp {
@@ -198,7 +194,6 @@ fn maybe_arm_ack_timer(myself: &ActorRef<HeadlampActorMsg>, state: &mut Headlamp
 /// Fire-and-forget tell to the headlamp twinlet (no reply port on this hop).
 pub fn tell_headlamp_zone(
     headlamp: &ActorRef<HeadlampActorMsg>,
-    brain: &ActorRef<TwinMessage>,
     turn_id: u64,
     tell_attempt: u32,
     message: HeadlampMessage,
@@ -210,9 +205,100 @@ pub fn tell_headlamp_zone(
             now,
             turn_id,
             tell_attempt,
-            brain: brain.clone(),
         }))
         .map_err(|e| {
             ActorProcessingErr::from(std::io::Error::other(format!("tell_headlamp_zone: {e:?}")))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fsm::AssemblyId;
+    use tokio::sync::mpsc;
+
+    #[derive(Default)]
+    struct ReadyCollector;
+
+    struct CollectorState {
+        tx: mpsc::UnboundedSender<TwinMessage>,
+    }
+
+    #[async_trait]
+    impl Actor for ReadyCollector {
+        type Msg = TwinMessage;
+        type State = CollectorState;
+        type Arguments = mpsc::UnboundedSender<TwinMessage>;
+
+        async fn pre_start(
+            &self,
+            _myself: ActorRef<Self::Msg>,
+            tx: Self::Arguments,
+        ) -> Result<Self::State, ActorProcessingErr> {
+            Ok(CollectorState { tx })
+        }
+
+        async fn handle(
+            &self,
+            _myself: ActorRef<Self::Msg>,
+            message: Self::Msg,
+            state: &mut Self::State,
+        ) -> Result<(), ActorProcessingErr> {
+            let _ = state.tx.send(message);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn tell_backs_use_the_parent_brain_captured_at_construction() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (brain, _brain_handle) = ractor::spawn::<ReadyCollector>(tx)
+            .await
+            .expect("collector");
+        let (headlamp, _headlamp_handle) = ractor::spawn::<HeadlampActor>(HeadlampActorState::new(
+            HeadlampContext {
+                state: crate::vehicle_state::HeadlampState::Ready,
+                ack_pending_since: None,
+            },
+            false,
+            brain.clone(),
+        ))
+        .await
+        .expect("headlamp actor");
+
+        tell_headlamp_zone(&headlamp, 3, 1, HeadlampMessage::BecomeOn, Instant::now())
+            .expect("tell become on");
+        let TwinMessage::ZoneReady {
+            zone_id,
+            turn_id,
+            tell_attempt,
+            ..
+        } = tokio::time::timeout(std::time::Duration::from_millis(250), rx.recv())
+            .await
+            .expect("zone ready timeout")
+            .expect("collector closed")
+        else {
+            panic!("expected ZoneReady tell-back");
+        };
+        assert_eq!(zone_id, AssemblyId::Headlamp);
+        assert_eq!(turn_id, 3);
+        assert_eq!(tell_attempt, 1);
+
+        tell_headlamp_zone(&headlamp, 4, 0, HeadlampMessage::BecomeOff, Instant::now())
+            .expect("tell become off");
+        let TwinMessage::ZoneReady {
+            zone_id, turn_id, ..
+        } = tokio::time::timeout(std::time::Duration::from_millis(250), rx.recv())
+            .await
+            .expect("second tell-back timeout")
+            .expect("collector closed")
+        else {
+            panic!("expected second ZoneReady tell-back");
+        };
+        assert_eq!(zone_id, AssemblyId::Headlamp);
+        assert_eq!(turn_id, 4);
+
+        brain.stop(None);
+        headlamp.stop(None);
+    }
 }

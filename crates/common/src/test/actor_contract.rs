@@ -19,16 +19,22 @@ use tokio::sync::mpsc;
 const DEFAULT_ACTOR_TIMEOUT: Duration = Duration::from_millis(250);
 
 #[tokio::test]
-async fn default_phase_i_topology_ignores_legacy_headlamp_and_wiper_ingress() {
+async fn default_observed_ecus_topology_ignores_legacy_headlamp_and_wiper_ingress() {
     let (transition_tx, mut transition_rx) = mpsc::channel(8);
+    assert_eq!(
+        VehicleControllerRuntimeOptions::default().assembly_topology,
+        AssemblyTopology::ObservedEcus
+    );
     let options = VehicleControllerRuntimeOptions {
         transition_tx: Some(transition_tx),
         ..Default::default()
     };
-    let (controller, handle) =
-        VehicleController::install_and_start_with_options("PHASE-I-TOPOLOGY".to_string(), options)
-            .await
-            .expect("install twin");
+    let (controller, handle) = VehicleController::install_and_start_with_options(
+        "OBSERVED-ECUS-TOPOLOGY".to_string(),
+        options,
+    )
+    .await
+    .expect("install twin");
     let _guard = ActorGuard {
         addr: controller.get_actor_ref().clone(),
         handle,
@@ -52,7 +58,7 @@ async fn default_phase_i_topology_ignores_legacy_headlamp_and_wiper_ingress() {
         tokio::time::timeout(DEFAULT_ACTOR_TIMEOUT, transition_rx.recv())
             .await
             .is_err(),
-        "default Phase I topology must not route legacy assembly ingress"
+        "default ObservedEcus topology must not route legacy assembly ingress"
     );
     let snapshot = controller
         .get_snapshot(Some(DEFAULT_ACTOR_TIMEOUT))

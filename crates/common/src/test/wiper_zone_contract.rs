@@ -262,15 +262,6 @@ fn given_wiper_running_when_stop_then_ready_with_stop_wiping_outcome() {
     assert_eq!(reply.outcomes, vec![WiperOutcome::StopWiping]);
 }
 
-// ── Test 1b: WiperOutcome::LogWarning variant exists ─────────────────────────
-
-#[test]
-fn given_wiper_log_warning_outcome_when_created_then_matches_variant() {
-    use crate::vehicle_state::WiperOutcome;
-    let outcome = WiperOutcome::LogWarning("wiper unresponsive".to_string());
-    assert!(matches!(outcome, WiperOutcome::LogWarning(_)));
-}
-
 // ── Test 7: BecomeOff from Running → Off directly ────────────────────────────
 
 #[test]

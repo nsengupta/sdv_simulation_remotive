@@ -17,7 +17,6 @@ pub struct FlcmActorVocabulary {
     pub message: FlcmMessage,
     pub turn_id: u64,
     pub tell_attempt: u32,
-    pub brain: ActorRef<TwinMessage>,
 }
 
 #[derive(Debug)]
@@ -31,24 +30,28 @@ pub struct FlcmActorState {
     pub ctx: FlcmContext,
     /// Test-only mute of this zone (mirrors `BcmActorState::silent`); unrelated to
     /// [`FlcmContext::silent`], which is the FLCM liveness verdict.
+    ///
+    /// Two `silent` flags on one actor is not a clean design: this one swallows tells
+    /// in contract tests, the other is a published lamp-liveness bit. Revisit later
+    /// (rename this field, or stop overloading the word).
     pub silent: bool,
     pub powered: bool,
     pub left_streak: ObservationStreak<bool>,
     pub right_streak: ObservationStreak<bool>,
-    brain: Option<ActorRef<TwinMessage>>,
+    brain: ActorRef<TwinMessage>,
     silence_timer: Option<SilenceTimer>,
     deadline_id: u64,
 }
 
 impl FlcmActorState {
-    pub fn new(ctx: FlcmContext, silent: bool) -> Self {
+    pub fn new(ctx: FlcmContext, silent: bool, brain: ActorRef<TwinMessage>) -> Self {
         Self {
             ctx,
             silent,
             powered: false,
             left_streak: ObservationStreak::default(),
             right_streak: ObservationStreak::default(),
-            brain: None,
+            brain,
             silence_timer: None,
             deadline_id: 0,
         }
@@ -108,7 +111,6 @@ impl FlcmActor {
         if state.silent {
             return Ok(());
         }
-        state.brain = Some(vocab.brain.clone());
         let message = vocab.message;
         let reply = apply_flcm_message(state, message);
         match message {
@@ -120,7 +122,7 @@ impl FlcmActor {
             FlcmMessage::BecomeOn | FlcmMessage::BecomeOff => cancel_silence_deadline(state),
             FlcmMessage::SilenceChanged(_) => {}
         }
-        vocab
+        state
             .brain
             .send_message(TwinMessage::ZoneReady {
                 zone_id: crate::fsm::AssemblyId::Flcm,
@@ -143,14 +145,12 @@ impl FlcmActor {
             return Ok(());
         }
         state.silence_timer = None;
-        let Some(brain) = state.brain.clone() else {
-            return Ok(());
-        };
         let reply = state
             .ctx
             .on_receiving_message(FlcmMessage::SilenceChanged(true));
         state.ctx = reply.ctx.clone();
-        brain
+        state
+            .brain
             .send_message(TwinMessage::ZoneSpontaneous {
                 zone_id: crate::fsm::AssemblyId::Flcm,
                 event: ZoneSpontaneousEvent::Flcm { reply },
@@ -242,7 +242,6 @@ fn apply_observation(
 
 pub fn tell_flcm_zone(
     flcm: &ActorRef<FlcmActorMsg>,
-    brain: &ActorRef<TwinMessage>,
     turn_id: u64,
     tell_attempt: u32,
     message: FlcmMessage,
@@ -251,7 +250,103 @@ pub fn tell_flcm_zone(
         message,
         turn_id,
         tell_attempt,
-        brain: brain.clone(),
     }))
     .map_err(|e| ActorProcessingErr::from(std::io::Error::other(format!("tell_flcm_zone: {e:?}"))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::digital_twin::{TwinMessage, ZoneReply};
+    use crate::fsm::AssemblyId;
+    use crate::vehicle_state::{FlcmContext, FlcmMessage, ObservationDisposition};
+    use tokio::sync::mpsc;
+
+    #[derive(Default)]
+    struct ReadyCollector;
+
+    struct CollectorState {
+        tx: mpsc::UnboundedSender<TwinMessage>,
+    }
+
+    #[async_trait]
+    impl Actor for ReadyCollector {
+        type Msg = TwinMessage;
+        type State = CollectorState;
+        type Arguments = mpsc::UnboundedSender<TwinMessage>;
+
+        async fn pre_start(
+            &self,
+            _myself: ActorRef<Self::Msg>,
+            tx: Self::Arguments,
+        ) -> Result<Self::State, ActorProcessingErr> {
+            Ok(CollectorState { tx })
+        }
+
+        async fn handle(
+            &self,
+            _myself: ActorRef<Self::Msg>,
+            message: Self::Msg,
+            state: &mut Self::State,
+        ) -> Result<(), ActorProcessingErr> {
+            let _ = state.tx.send(message);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn tell_backs_use_the_parent_brain_captured_at_construction() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (brain, _brain_handle) = ractor::spawn::<ReadyCollector>(tx)
+            .await
+            .expect("collector");
+        let (flcm, _flcm_handle) = ractor::spawn::<FlcmActor>(FlcmActorState::new(
+            FlcmContext::default(),
+            false,
+            brain.clone(),
+        ))
+        .await
+        .expect("flcm actor");
+
+        tell_flcm_zone(&flcm, 7, 1, FlcmMessage::BecomeOn).expect("tell become on");
+
+        let TwinMessage::ZoneReady {
+            zone_id,
+            turn_id,
+            tell_attempt,
+            reply,
+        } = tokio::time::timeout(Duration::from_millis(250), rx.recv())
+            .await
+            .expect("zone ready timeout")
+            .expect("collector closed")
+        else {
+            panic!("expected ZoneReady tell-back");
+        };
+        assert_eq!(zone_id, AssemblyId::Flcm);
+        assert_eq!(turn_id, 7);
+        assert_eq!(tell_attempt, 1);
+        match reply {
+            ZoneReply::Flcm(reply) => {
+                assert_eq!(reply.disposition, ObservationDisposition::Lifecycle);
+            }
+            other => panic!("unexpected reply {other:?}"),
+        }
+
+        tell_flcm_zone(&flcm, 8, 0, FlcmMessage::LeftLowBeamStatusObserved(true))
+            .expect("tell left status");
+        let TwinMessage::ZoneReady {
+            zone_id, turn_id, ..
+        } = tokio::time::timeout(Duration::from_millis(250), rx.recv())
+            .await
+            .expect("second tell-back timeout")
+            .expect("collector closed")
+        else {
+            panic!("expected second ZoneReady tell-back");
+        };
+        assert_eq!(zone_id, AssemblyId::Flcm);
+        assert_eq!(turn_id, 8);
+
+        brain.stop(None);
+        flcm.stop(None);
+    }
 }

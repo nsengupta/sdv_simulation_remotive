@@ -1,4 +1,4 @@
-use crate::decoder::{decode_boolean, decode_ok_fail};
+use crate::dbc_signal_decoder::{decode_dbc_off_or_on, decode_dbc_ok_or_fail};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use emulator::models::{PhysicalWorldModelConfig, RpmModel};
@@ -112,18 +112,20 @@ fn observation_kind(
     let id = signal.id.as_ref()?;
     let namespace = id.namespace.as_ref()?.name.as_str();
     match (namespace, id.name.as_str()) {
-        (HAZARD_NAMESPACE, HAZARD_NAME) => Some((BrokerObservation::HazardButton, decode_boolean)),
+        (HAZARD_NAMESPACE, HAZARD_NAME) => {
+            Some((BrokerObservation::HazardButton, decode_dbc_off_or_on))
+        }
         (TURN_NAMESPACE, LEFT_TURN_NAME) => {
-            Some((BrokerObservation::LeftTurnRequest, decode_boolean))
+            Some((BrokerObservation::LeftTurnRequest, decode_dbc_off_or_on))
         }
         (TURN_NAMESPACE, RIGHT_TURN_NAME) => {
-            Some((BrokerObservation::RightTurnRequest, decode_boolean))
+            Some((BrokerObservation::RightTurnRequest, decode_dbc_off_or_on))
         }
         (FLCM_NAMESPACE, LEFT_LOW_BEAM_STATUS_NAME) => {
-            Some((BrokerObservation::LeftLowBeamStatus, decode_ok_fail))
+            Some((BrokerObservation::LeftLowBeamStatus, decode_dbc_ok_or_fail))
         }
         (FLCM_NAMESPACE, RIGHT_LOW_BEAM_STATUS_NAME) => {
-            Some((BrokerObservation::RightLowBeamStatus, decode_ok_fail))
+            Some((BrokerObservation::RightLowBeamStatus, decode_dbc_ok_or_fail))
         }
         _ => None,
     }

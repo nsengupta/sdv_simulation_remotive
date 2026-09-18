@@ -66,6 +66,7 @@ async fn spawn_bcm_child(
             ..Default::default()
         },
         silent,
+        brain.clone(),
     ))
     .await
     .expect("bcm actor");
@@ -127,9 +128,9 @@ async fn spawn_silent_bcm(
 
 #[tokio::test]
 async fn bcm_become_on_tells_back_lifecycle_readiness() {
-    let (bcm, brain, mut rx, _bcm_guard, _brain_guard) = spawn_bcm_child(false).await;
+    let (bcm, _brain, mut rx, _bcm_guard, _brain_guard) = spawn_bcm_child(false).await;
 
-    tell_bcm_zone(&bcm, &brain, 2, 0, BcmMessage::BecomeOn).expect("tell become on");
+    tell_bcm_zone(&bcm, 2, 0, BcmMessage::BecomeOn).expect("tell become on");
     let TwinMessage::ZoneReady {
         zone_id,
         turn_id,
@@ -149,16 +150,9 @@ async fn bcm_become_on_tells_back_lifecycle_readiness() {
 
 #[tokio::test]
 async fn bcm_owns_independent_left_and_right_observations() {
-    let (bcm, brain, mut rx, _bcm_guard, _brain_guard) = spawn_bcm_child(false).await;
+    let (bcm, _brain, mut rx, _bcm_guard, _brain_guard) = spawn_bcm_child(false).await;
 
-    tell_bcm_zone(
-        &bcm,
-        &brain,
-        4,
-        0,
-        BcmMessage::LeftTurnRequestObserved(false),
-    )
-    .expect("left");
+    tell_bcm_zone(&bcm, 4, 0, BcmMessage::LeftTurnRequestObserved(false)).expect("left");
     let TwinMessage::ZoneReady { reply, .. } = next_ready(&mut rx).await else {
         panic!("expected left ZoneReady");
     };
@@ -168,14 +162,7 @@ async fn bcm_owns_independent_left_and_right_observations() {
     assert_eq!(left.ctx.right_turn_request, ObservedBool::Unknown);
     assert!(left.outcomes.is_empty());
 
-    tell_bcm_zone(
-        &bcm,
-        &brain,
-        5,
-        0,
-        BcmMessage::RightTurnRequestObserved(true),
-    )
-    .expect("right");
+    tell_bcm_zone(&bcm, 5, 0, BcmMessage::RightTurnRequestObserved(true)).expect("right");
     let TwinMessage::ZoneReady { reply, .. } = next_ready(&mut rx).await else {
         panic!("expected right ZoneReady");
     };
@@ -193,34 +180,13 @@ async fn bcm_owns_independent_left_and_right_observations() {
 
 #[tokio::test]
 async fn bcm_duplicate_left_does_not_touch_right_streak() {
-    let (bcm, brain, mut rx, _bcm_guard, _brain_guard) = spawn_bcm_child(false).await;
+    let (bcm, _brain, mut rx, _bcm_guard, _brain_guard) = spawn_bcm_child(false).await;
 
-    tell_bcm_zone(
-        &bcm,
-        &brain,
-        1,
-        0,
-        BcmMessage::RightTurnRequestObserved(false),
-    )
-    .expect("right initial");
+    tell_bcm_zone(&bcm, 1, 0, BcmMessage::RightTurnRequestObserved(false)).expect("right initial");
     let _ = next_ready(&mut rx).await;
-    tell_bcm_zone(
-        &bcm,
-        &brain,
-        2,
-        0,
-        BcmMessage::LeftTurnRequestObserved(false),
-    )
-    .expect("left initial");
+    tell_bcm_zone(&bcm, 2, 0, BcmMessage::LeftTurnRequestObserved(false)).expect("left initial");
     let _ = next_ready(&mut rx).await;
-    tell_bcm_zone(
-        &bcm,
-        &brain,
-        3,
-        0,
-        BcmMessage::LeftTurnRequestObserved(false),
-    )
-    .expect("left duplicate");
+    tell_bcm_zone(&bcm, 3, 0, BcmMessage::LeftTurnRequestObserved(false)).expect("left duplicate");
     let TwinMessage::ZoneReady { reply, .. } = next_ready(&mut rx).await else {
         panic!("expected duplicate ZoneReady");
     };
@@ -237,27 +203,14 @@ async fn bcm_duplicate_left_does_not_touch_right_streak() {
 
 #[tokio::test]
 async fn bcm_change_reports_completed_left_streak() {
-    let (bcm, brain, mut rx, _bcm_guard, _brain_guard) = spawn_bcm_child(false).await;
+    let (bcm, _brain, mut rx, _bcm_guard, _brain_guard) = spawn_bcm_child(false).await;
 
     for turn_id in 1..=3 {
-        tell_bcm_zone(
-            &bcm,
-            &brain,
-            turn_id,
-            0,
-            BcmMessage::LeftTurnRequestObserved(false),
-        )
-        .expect("left false");
+        tell_bcm_zone(&bcm, turn_id, 0, BcmMessage::LeftTurnRequestObserved(false))
+            .expect("left false");
         let _ = next_ready(&mut rx).await;
     }
-    tell_bcm_zone(
-        &bcm,
-        &brain,
-        4,
-        0,
-        BcmMessage::LeftTurnRequestObserved(true),
-    )
-    .expect("left changed");
+    tell_bcm_zone(&bcm, 4, 0, BcmMessage::LeftTurnRequestObserved(true)).expect("left changed");
     let TwinMessage::ZoneReady { reply, .. } = next_ready(&mut rx).await else {
         panic!("expected changed ZoneReady");
     };
@@ -271,15 +224,20 @@ async fn bcm_change_reports_completed_left_streak() {
     assert_eq!(changed.ctx.left_turn_request, ObservedBool::On);
 }
 
-#[test]
-fn bcm_shutdown_summaries_report_independent_remaining_streaks() {
-    let mut state = BcmActorState::new(BcmContext::default(), false);
+#[tokio::test]
+async fn bcm_shutdown_summaries_report_independent_remaining_streaks() {
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let (brain, _) = ractor::spawn::<ReadyCollector>(tx)
+        .await
+        .expect("collector");
+    let mut state = BcmActorState::new(BcmContext::default(), false, brain.clone());
     state.left_streak.observe(false);
     state.left_streak.observe(false);
     state.right_streak.observe(true);
 
     assert_eq!(state.left_streak.pending_summary(), Some((false, 1)));
     assert_eq!(state.right_streak.pending_summary(), Some((true, 0)));
+    brain.stop(None);
 }
 
 #[tokio::test]

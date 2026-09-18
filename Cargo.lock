@@ -781,6 +781,7 @@ dependencies = [
  "ctrlc",
  "rand 0.10.2",
  "socketcan",
+ "vehicle_device_bus",
 ]
 
 [[package]]
@@ -2676,6 +2677,7 @@ dependencies = [
  "socketcan",
  "tokio",
  "tonic",
+ "vehicle_device_bus",
 ]
 
 [[package]]

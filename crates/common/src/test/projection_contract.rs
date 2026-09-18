@@ -6,20 +6,6 @@ use crate::twin_runtime::connectors::{IngressToFsmProjector, ProjectionError, Pr
 use crate::{ControlSignal, LifecycleCommand, ObservedEcuSignal, TwinIngressEvent, VssSignal};
 
 #[test]
-fn canonical_twin_ingress_names_are_public_and_projectable() {
-    use crate::{IngressToFsmProjector, LifecycleCommand, TwinIngressEvent, TwinMessage};
-
-    let projector = IngressToFsmProjector;
-    let output = projector
-        .project(TwinIngressEvent::Telemetry(VssSignal::Speed(50.0)))
-        .expect_err("observed speed remains unsupported by the FSM");
-
-    assert!(matches!(output, ProjectionError::InvalidPayload(_)));
-    assert_eq!(LifecycleCommand::PowerOn, LifecycleCommand::PowerOn);
-    let _: Option<TwinMessage> = None;
-}
-
-#[test]
 fn given_timer_tick_when_projected_then_maps_to_fsm_timer_tick() {
     let projector = IngressToFsmProjector;
     let out = projector
@@ -145,7 +131,7 @@ fn observed_right_turn_projects_to_right_turn_request_observed() {
 }
 
 #[test]
-fn unsupported_phase_one_telemetry_is_rejected() {
+fn unsupported_observation_ingress_telemetry_is_rejected() {
     let projector = IngressToFsmProjector;
     for signal in [
         VssSignal::Speed(50.0),
@@ -154,7 +140,7 @@ fn unsupported_phase_one_telemetry_is_rejected() {
     ] {
         let err = projector
             .project(TwinIngressEvent::Telemetry(signal))
-            .expect_err("unsupported Phase I telemetry must be rejected");
+            .expect_err("unsupported observation-ingress telemetry must be rejected");
         assert!(matches!(err, ProjectionError::InvalidPayload(_)));
     }
 }

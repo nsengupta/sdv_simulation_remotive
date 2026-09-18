@@ -53,7 +53,7 @@ fn main() -> Result<()> {
         stop_for_handler.store(true, Ordering::SeqCst);
     })?;
 
-    let mut sink = SocketCanSink::open("vcan0")?;
+    let mut sink = SocketCanSink::open(vehicle_device_bus::DEFAULT_CAN_INTERFACE)?;
     let mut source = LivePhysicsSource::from_config(cfg);
     run_session(
         &mut sink,

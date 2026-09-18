@@ -2,15 +2,14 @@
 //!
 //! Fire-and-forget protocol: no ACK/NACK is sent back to the gateway.
 
-use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
+use std::sync::mpsc::{SyncSender, TrySendError, sync_channel};
 use std::thread;
 
 use anyhow::Result;
 use socketcan::{CanSocket, Socket};
+use vehicle_device_bus::DEFAULT_CAN_INTERFACE;
 use vehicle_device_bus::can::wire_kinds::{KIND_WIPER_CMD_START, KIND_WIPER_CMD_STOP};
 use vehicle_device_bus::devices::wiper::can::decode_payload_from_can_frame;
-
-pub const DEFAULT_CAN_INTERFACE: &str = "vcan0";
 
 /// If set to a float in `0.0..=1.0`, the actuator randomly **ignores** a CMD (no motor actuation).
 pub const ENV_DROP_RESPONSE_PROB: &str = "WIPER_ACTUATOR_DROP_RESPONSE_PROB";

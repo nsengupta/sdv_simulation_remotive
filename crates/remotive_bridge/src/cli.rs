@@ -4,7 +4,7 @@ use std::num::NonZeroUsize;
 use std::time::Duration;
 
 pub const DEFAULT_BROKER_URL: &str = "http://127.0.0.1:50051";
-pub const DEFAULT_CAN_INTERFACE: &str = "vcan0";
+pub use vehicle_device_bus::DEFAULT_CAN_INTERFACE;
 pub const DEFAULT_TICK_MS: u64 = emulator::cli::DEFAULT_TICK_MS;
 /// Default RPM ceiling (keeps Twin Idle: Driving needs rpm > this value).
 pub const DEFAULT_RPM_CLAMP: u16 = RPM_DRIVING_THRESHOLD;

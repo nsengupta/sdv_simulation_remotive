@@ -25,10 +25,7 @@ impl ShutdownCoordinator {
     /// Stub: returns `Ok` until Ctrl+C (or equivalent) calls this from Gateway `main`.
     /// Intended: `send_power_off` if needed, await `FsmState::Off` (or timeout), then tear
     /// down actor + ingress. Dashboard stays out of this path.
-    pub async fn ensure_stopped_before_exit(
-        &self,
-        _controller: &VehicleController,
-    ) -> Result<()> {
+    pub async fn ensure_stopped_before_exit(&self, _controller: &VehicleController) -> Result<()> {
         let _ = self.stop_timeout;
         Ok(())
     }

@@ -307,7 +307,7 @@ async fn runtime_warns_once_after_500ms_silence_and_clears_on_healthy_traffic() 
     handle.await.expect("controller task");
 }
 
-/// A topology that never publishes FLCM status (Phase I/II/III demos, emulator-only runs)
+/// A topology that never publishes FLCM status (ObservedEcus demos, emulator-only runs)
 /// must stay `Unknown` — the watchdog is armed by the first observation, not by power-on.
 #[tokio::test]
 async fn runtime_never_warns_when_flcm_was_never_observed() {

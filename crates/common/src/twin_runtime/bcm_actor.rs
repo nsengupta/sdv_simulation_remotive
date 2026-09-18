@@ -10,7 +10,6 @@ pub struct BcmActorVocabulary {
     pub message: BcmMessage,
     pub turn_id: u64,
     pub tell_attempt: u32,
-    pub brain: ActorRef<TwinMessage>,
 }
 
 #[derive(Debug)]
@@ -24,15 +23,17 @@ pub struct BcmActorState {
     pub silent: bool,
     pub left_streak: ObservationStreak<bool>,
     pub right_streak: ObservationStreak<bool>,
+    brain: ActorRef<TwinMessage>,
 }
 
 impl BcmActorState {
-    pub fn new(ctx: BcmContext, silent: bool) -> Self {
+    pub fn new(ctx: BcmContext, silent: bool, brain: ActorRef<TwinMessage>) -> Self {
         Self {
             ctx,
             silent,
             left_streak: ObservationStreak::default(),
             right_streak: ObservationStreak::default(),
+            brain,
         }
     }
 }
@@ -65,7 +66,7 @@ impl Actor for BcmActor {
             return Ok(());
         }
         let reply = apply_bcm_message(state, vocab.message);
-        vocab
+        state
             .brain
             .send_message(TwinMessage::ZoneReady {
                 zone_id: crate::fsm::AssemblyId::Bcm,
@@ -154,7 +155,6 @@ fn observe_bcm_bool(
 
 pub fn tell_bcm_zone(
     bcm: &ActorRef<BcmActorMsg>,
-    brain: &ActorRef<TwinMessage>,
     turn_id: u64,
     tell_attempt: u32,
     message: BcmMessage,
@@ -163,7 +163,6 @@ pub fn tell_bcm_zone(
         message,
         turn_id,
         tell_attempt,
-        brain: brain.clone(),
     }))
     .map_err(|e| ActorProcessingErr::from(std::io::Error::other(format!("tell_bcm_zone: {e:?}"))))
 }

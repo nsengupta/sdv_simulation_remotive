@@ -206,7 +206,7 @@ async fn observed_hazard_left_and_right_cross_gateway_twin_ledger_and_tui_dtos()
     let (transition_tx, mut transition_rx) = mpsc::channel(32);
     let (actuation_tx, mut actuation_rx) = mpsc::channel(16);
     let runtime_options = VehicleControllerRuntimeOptions {
-        assembly_topology: AssemblyTopology::PhaseI,
+        assembly_topology: AssemblyTopology::ObservedEcus,
         transition_tx: Some(transition_tx),
         actuation_command_tx: Some(actuation_tx),
         ..Default::default()
@@ -547,7 +547,7 @@ async fn observed_flcm_ok_and_fail_cross_gateway_twin_ledger_and_warning() {
     let (diagnostic_tx, mut diagnostic_rx) = mpsc::unbounded_channel();
     let (actuation_tx, mut actuation_rx) = mpsc::channel(16);
     let runtime_options = VehicleControllerRuntimeOptions {
-        assembly_topology: AssemblyTopology::PhaseI,
+        assembly_topology: AssemblyTopology::ObservedEcus,
         transition_tx: Some(transition_tx),
         diagnostic_tx: Some(diagnostic_tx),
         actuation_command_tx: Some(actuation_tx),
@@ -729,7 +729,7 @@ async fn observed_flcm_silence_sets_silent_flag_and_warning() {
     let (transition_tx, mut transition_rx) = mpsc::channel(32);
     let (diagnostic_tx, mut diagnostic_rx) = mpsc::unbounded_channel();
     let runtime_options = VehicleControllerRuntimeOptions {
-        assembly_topology: AssemblyTopology::PhaseI,
+        assembly_topology: AssemblyTopology::ObservedEcus,
         transition_tx: Some(transition_tx),
         diagnostic_tx: Some(diagnostic_tx),
         ..Default::default()
@@ -785,14 +785,14 @@ async fn observed_flcm_silence_sets_silent_flag_and_warning() {
     );
 }
 
-/// Phase I/II/III topologies and emulator-only runs publish no FLCM status at all. Power-on
+/// Observed-ECU and emulator-only runs publish no FLCM status at all. Power-on
 /// alone must not arm the watchdog, so those runs stay silent-free and ledger-quiet.
 #[tokio::test]
 async fn power_on_without_flcm_traffic_never_warns_or_writes_a_silent_row() {
     let (transition_tx, mut transition_rx) = mpsc::channel(32);
     let (diagnostic_tx, mut diagnostic_rx) = mpsc::unbounded_channel();
     let runtime_options = VehicleControllerRuntimeOptions {
-        assembly_topology: AssemblyTopology::PhaseI,
+        assembly_topology: AssemblyTopology::ObservedEcus,
         transition_tx: Some(transition_tx),
         diagnostic_tx: Some(diagnostic_tx),
         ..Default::default()

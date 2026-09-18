@@ -195,6 +195,7 @@ impl Actor for VirtualCarActor {
                         ack_pending_since: None,
                     },
                     args.runtime_options.test_silent_headlamp,
+                    myself.clone(),
                 ))
                 .await?;
                 let (wiper, _) = ractor::spawn::<WiperActor>(WiperActorState::new(
@@ -202,6 +203,7 @@ impl Actor for VirtualCarActor {
                         state: WiperState::Ready,
                     },
                     args.runtime_options.test_silent_wiper,
+                    myself.clone(),
                 ))
                 .await?;
                 (Some(headlamp), Some(wiper))
@@ -212,16 +214,19 @@ impl Actor for VirtualCarActor {
         let (sccm_actor, _) = ractor::spawn::<SccmActor>(SccmActorState::new(
             Default::default(),
             args.runtime_options.test_silent_sccm,
+            myself.clone(),
         ))
         .await?;
         let (bcm_actor, _) = ractor::spawn::<BcmActor>(BcmActorState::new(
             Default::default(),
             args.runtime_options.test_silent_bcm,
+            myself.clone(),
         ))
         .await?;
         let (flcm_actor, _) = ractor::spawn::<FlcmActor>(FlcmActorState::new(
             Default::default(),
             args.runtime_options.test_silent_flcm,
+            myself.clone(),
         ))
         .await?;
 
@@ -259,7 +264,12 @@ impl Actor for VirtualCarActor {
 
         match message {
             Fsm(evt_arrived) => {
-                if runtime_state.runtime_options.assembly_topology == AssemblyTopology::PhaseI
+                // ObservedEcus has no headlamp/wiper actors and does not run lighting or rain
+                // policy. Drop these events before a turn is opened so they never queue a
+                // barrier or drive FSM transitions that cannot be executed. Lux/rain are
+                // already rejected at the projector; this also covers `submit_fsm_event`
+                // (tests) and residual headlamp ACK ingress.
+                if runtime_state.runtime_options.assembly_topology == AssemblyTopology::ObservedEcus
                     && matches!(
                         evt_arrived,
                         FsmEvent::UpdateAmbientLux(_)
@@ -380,7 +390,6 @@ impl VirtualCarActor {
 
     fn tell_zone(
         runtime_state: &VirtualCarRuntimeState,
-        brain: &ActorRef<TwinMessage>,
         _assembly_id: AssemblyId,
         message: &ZoneMessage,
         turn_id: u64,
@@ -389,21 +398,20 @@ impl VirtualCarActor {
     ) -> Result<(), ActorProcessingErr> {
         match message {
             ZoneMessage::Sccm(m) => {
-                tell_sccm_zone(&runtime_state.sccm_actor, brain, turn_id, tell_attempt, *m)
+                tell_sccm_zone(&runtime_state.sccm_actor, turn_id, tell_attempt, *m)
             }
             ZoneMessage::Bcm(m) => {
-                tell_bcm_zone(&runtime_state.bcm_actor, brain, turn_id, tell_attempt, *m)
+                tell_bcm_zone(&runtime_state.bcm_actor, turn_id, tell_attempt, *m)
             }
             ZoneMessage::Flcm(m) => {
-                tell_flcm_zone(&runtime_state.flcm_actor, brain, turn_id, tell_attempt, *m)
+                tell_flcm_zone(&runtime_state.flcm_actor, turn_id, tell_attempt, *m)
             }
             ZoneMessage::Headlamp(m) => tell_headlamp_zone(
                 runtime_state.headlamp_actor.as_ref().ok_or_else(|| {
                     ActorProcessingErr::from(std::io::Error::other(
-                        "headlamp zone unavailable in Phase I topology",
+                        "headlamp zone unavailable in ObservedEcus topology",
                     ))
                 })?,
-                brain,
                 turn_id,
                 tell_attempt,
                 *m,
@@ -412,10 +420,9 @@ impl VirtualCarActor {
             ZoneMessage::Wiper(m) => tell_wiper_zone(
                 runtime_state.wiper_actor.as_ref().ok_or_else(|| {
                     ActorProcessingErr::from(std::io::Error::other(
-                        "wiper zone unavailable in Phase I topology",
+                        "wiper zone unavailable in ObservedEcus topology",
                     ))
                 })?,
-                brain,
                 turn_id,
                 tell_attempt,
                 *m,
@@ -494,7 +501,7 @@ impl VirtualCarActor {
             zone_message_for_event(&event, runtime_state.twin_car.current_state())
         {
             let wait = TellBackWait::new(turn_id);
-            Self::tell_zone(runtime_state, brain, zone_id, &message, turn_id, 0, now)?;
+            Self::tell_zone(runtime_state, zone_id, &message, turn_id, 0, now)?;
             let timer = Self::arm_tell_back_timer(brain, zone_id, turn_id, 0);
             let mut barrier = TurnBarrier::new(turn_id, event, now);
             barrier.add_pending_zone(zone_id, message, wait, timer);
@@ -588,7 +595,6 @@ impl VirtualCarActor {
 
                 Self::tell_zone(
                     runtime_state,
-                    brain,
                     zone_id,
                     &msg,
                     turn_id,
@@ -729,6 +735,8 @@ impl VirtualCarActor {
             FsmEvent::PowerOff => Some(FlcmMessage::BecomeOff),
             _ => None,
         });
+        // One expression, three jobs: mutate the latch, decide emit, and treat power as a
+        // new epoch so Unknown-after-power is not mistaken for recovery. Revisit later.
         let emit_flcm_diagnostic = if flcm_lifecycle.is_some() {
             runtime_state.flcm_warning_active = false;
             false
@@ -770,13 +778,7 @@ impl VirtualCarActor {
         );
 
         if let Some(message) = flcm_lifecycle {
-            tell_flcm_zone(
-                &runtime_state.flcm_actor,
-                &runtime_state.self_ref,
-                0,
-                0,
-                message,
-            )?;
+            tell_flcm_zone(&runtime_state.flcm_actor, 0, 0, message)?;
         }
 
         if let Some(sink) = &runtime_state.diagnostic_sink {
@@ -794,6 +796,7 @@ impl VirtualCarActor {
                 }
             }
 
+            // Emit only when wiping starts or stops, not on every committed turn.
             let wiping_before = matches!(wiper_before, WiperState::Running);
             let wiping_after = matches!(wiper_after, WiperState::Running);
             if wiping_before != wiping_after {
@@ -819,6 +822,14 @@ impl VirtualCarActor {
             }
         }
 
+        Self::execute_merged_actions(runtime_state, &quiescent, headlamp_unconfirmed).await
+    }
+
+    async fn execute_merged_actions(
+        runtime_state: &mut VirtualCarRuntimeState,
+        quiescent: &crate::twin_runtime::twin_turn::QuiescentResult,
+        headlamp_unconfirmed: Option<(bool, FrontHeadlampIncompleteCause)>,
+    ) -> Result<(), ActorProcessingErr> {
         for action in quiescent.merged_actions() {
             match action {
                 DomainAction::LogWarning(message) => {
@@ -831,48 +842,18 @@ impl VirtualCarActor {
                     }
                 }
                 DomainAction::StartAssemblies(assemblies) => {
-                    let now = Instant::now();
-                    let brain = runtime_state.self_ref.clone();
-                    for &assembly_id in assemblies.iter() {
-                        let turn_id = runtime_state.alloc_turn_id();
-                        let msg = Self::become_on_message_for(assembly_id);
-                        let wait = TellBackWait::new(turn_id);
-                        Self::tell_zone(runtime_state, &brain, assembly_id, &msg, turn_id, 0, now)?;
-                        let timer = Self::arm_tell_back_timer(&brain, assembly_id, turn_id, 0);
-                        let barrier = TurnBarrier::new_for_assembly_zone(
-                            turn_id,
-                            assembly_id,
-                            msg,
-                            wait,
-                            timer,
-                            now,
-                        );
-                        runtime_state
-                            .barrier_queue
-                            .push_back(BarrierEntry::Waiting(barrier));
-                    }
+                    Self::enqueue_assembly_lifecycle(
+                        runtime_state,
+                        &assemblies,
+                        Self::become_on_message_for,
+                    )?;
                 }
                 DomainAction::StopAssemblies(assemblies) => {
-                    let now = Instant::now();
-                    let brain = runtime_state.self_ref.clone();
-                    for &assembly_id in assemblies.iter() {
-                        let turn_id = runtime_state.alloc_turn_id();
-                        let msg = Self::become_off_message_for(assembly_id);
-                        let wait = TellBackWait::new(turn_id);
-                        Self::tell_zone(runtime_state, &brain, assembly_id, &msg, turn_id, 0, now)?;
-                        let timer = Self::arm_tell_back_timer(&brain, assembly_id, turn_id, 0);
-                        let barrier = TurnBarrier::new_for_assembly_zone(
-                            turn_id,
-                            assembly_id,
-                            msg,
-                            wait,
-                            timer,
-                            now,
-                        );
-                        runtime_state
-                            .barrier_queue
-                            .push_back(BarrierEntry::Waiting(barrier));
-                    }
+                    Self::enqueue_assembly_lifecycle(
+                        runtime_state,
+                        &assemblies,
+                        Self::become_off_message_for,
+                    )?;
                 }
                 other_action => {
                     if let Err(err) = runtime_state
@@ -891,7 +872,26 @@ impl VirtualCarActor {
                 }
             }
         }
+        Ok(())
+    }
 
+    fn enqueue_assembly_lifecycle(
+        runtime_state: &mut VirtualCarRuntimeState,
+        assemblies: &[AssemblyId],
+        lifecycle_message: fn(AssemblyId) -> ZoneMessage,
+    ) -> Result<(), ActorProcessingErr> {
+        let now = Instant::now();
+        let brain = runtime_state.self_ref.clone();
+        for &assembly_id in assemblies {
+            let turn_id = runtime_state.alloc_turn_id();
+            let msg = lifecycle_message(assembly_id);
+            let wait = TellBackWait::new(turn_id);
+            Self::tell_zone(runtime_state, assembly_id, &msg, turn_id, 0, now)?;
+            let timer = Self::arm_tell_back_timer(&brain, assembly_id, turn_id, 0);
+            runtime_state.barrier_queue.push_back(BarrierEntry::Waiting(
+                TurnBarrier::new_for_assembly_zone(turn_id, assembly_id, msg, wait, timer, now),
+            ));
+        }
         Ok(())
     }
 

@@ -1,18 +1,18 @@
 //! Front headlamp actuator — listens for CMD frames on SocketCAN and responds with ACK/NACK.
 
-use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
+use std::sync::mpsc::{SyncSender, TrySendError, sync_channel};
 use std::thread;
 use std::time::Duration;
 
 use anyhow::Result;
 use common::ActuationCommand;
 use socketcan::{CanSocket, Socket};
+use vehicle_device_bus::DEFAULT_CAN_INTERFACE;
 use vehicle_device_bus::devices::front_headlamp::can::{
     actuation_command_from_cmd_payload, actuation_command_wire_meta, decode_payload_from_can_frame,
     encode_ack_frame, encode_nack_frame,
 };
 
-pub const DEFAULT_CAN_INTERFACE: &str = "vcan0";
 const DEFAULT_ACK_DELAY_MS: u64 = 150;
 /// Default ACK probability when the actuator chooses to send a response frame.
 pub const DEFAULT_ACK_NACK_RESPONSE_PROB: f64 = 0.7;
@@ -71,7 +71,9 @@ fn main() -> Result<()> {
         parse_prob_env(ENV_ACK_NACK_RESPONSE_PROB).unwrap_or(DEFAULT_ACK_NACK_RESPONSE_PROB);
 
     let socket = CanSocket::open(interface)?;
-    println!("💡 Front headlamp actuator on {interface} (CMD in → ACK/NACK out, delay {ack_delay:?})");
+    println!(
+        "💡 Front headlamp actuator on {interface} (CMD in → ACK/NACK out, delay {ack_delay:?})"
+    );
     if dont_respond_prob > 0.0 {
         println!(
             "[front-headlamp-actuator] {ENV_DROP_RESPONSE_PROB}={dont_respond_prob} — may sit tight (no response)"
@@ -81,9 +83,9 @@ fn main() -> Result<()> {
         "[front-headlamp-actuator] {ENV_ACK_NACK_RESPONSE_PROB}={ack_nack_response_prob} (P(ACK) when responding)"
     );
 
- // Off-hot-path logger: keep all in-loop logging off the CAN read/respond path so that console
- // back-pressure (a paused terminal via Ctrl-S/XOFF, a slow pipe, a full disk) can never block
- // `read_frame`/`write_frame` and starve the digital twin of ACK/NACK responses.
+    // Off-hot-path logger: keep all in-loop logging off the CAN read/respond path so that console
+    // back-pressure (a paused terminal via Ctrl-S/XOFF, a slow pipe, a full disk) can never block
+    // `read_frame`/`write_frame` and starve the digital twin of ACK/NACK responses.
     let (log_tx, log_rx) = sync_channel::<String>(LOG_CHANNEL_CAPACITY);
     thread::spawn(move || {
         for line in log_rx {
